@@ -86,49 +86,9 @@ class compartment_forecast_with_GP(object):
         from numpyro.infer import MCMC, NUTS
         from diffrax import diffeqsolve, ODETerm, Heun, SaveAt
 
-        def model(y=None, times=None, N=None, forecast = False):
-            # Define SIR ODE system
-            def f(t, y, args):
-                S, I, R, i = y
-                repo, gamma, N = args
-                beta = repo * gamma
-                dS = -beta * S * I / N
-                dI = beta * S * I / N - gamma * I
-                dR = gamma * I
-                di = beta * S * I / N
-                return jnp.array([dS, dI, dR, di])
-
-            # Sample initial infectious proportion and scale to population
-            I0 = numpyro.sample("I0", dist.Beta(1, 1))
-            I0 = N * I0
-
-            infectious_period = self.infectious_period
-            gamma = 1. / infectious_period
-
-            # Sample reproduction rate (scaled by 5)
-            repo = numpyro.sample("repo", dist.Beta(1, 1))
-            repo = 5 * repo
-
-            # Solve ODE forward in time
-            saves    = SaveAt(ts=jnp.arange(-1., self.end + 1, 1))
-
-            term     = ODETerm(f)
-            solver   = Heun()
-            
-            y0       = jnp.array([N - I0, I0, 0, I0])
-            solution = diffeqsolve(term, solver, t0=-1, t1=self.end + 1, dt0=dt, y0=y0, saveat=saves, args=(repo, gamma, N))
-
-            times = solution.ts[1:]
-            cinc  = solution.ys[:, -1]  # cumulative incidence
-
-            inc   = jnp.diff(cinc)      # incidence
-            inc  = numpyro.deterministic("inc", inc)
-
+        def model(y=None, times=None, N=None):
             #--setup residual vector
             nobs = self.nobs
-
-            #resid_center   = jnp.nanmean(y)
-            resid          = (y.reshape(-1,) - inc )[:nobs]
 
             # Define RBF kernel (optional for multiple covariates)
             def rbf_kernel_ard(X1, X2, amplitude, lengthscales):
@@ -142,9 +102,10 @@ class compartment_forecast_with_GP(object):
                     X2 = X
                 return variance * jnp.minimum(X, X2.T)
 
-            noise  = numpyro.sample("noise", dist.HalfCauchy(1.))
-            ncols  = X.shape[-1]
+            noise      = numpyro.sample("noise", dist.HalfCauchy(1.))
+            sigma_obs  = numpyro.sample("sigma_obs", dist.HalfCauchy(1.))
             
+            ncols  = X.shape[-1]
             rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.))
             K1     = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
 
@@ -158,43 +119,32 @@ class compartment_forecast_with_GP(object):
                 K = K1
 
             # Compute submatrices for GP residual conditioning
-            KOO = numpyro.deterministic("KOO", K[:nobs, :nobs] + noise * jnp.eye(nobs))
-            KTT = numpyro.deterministic("KTT", K[nobs:, nobs:]                        )
-            KOT = numpyro.deterministic("KOT", K[:nobs, nobs:]                        )
+            KOO = K[:nobs, :nobs] + noise * jnp.eye(nobs)
+            KTT = K[nobs:, nobs:]
+            KOT = K[:nobs, nobs:]
 
-        
+            center         = jnp.nanmean(y)
+            centered_y     = (y-center)[:nobs]
+            
             # Poisson observation model on residual-corrected prediction
-            training_resid = numpyro.sample("training_resid", dist.MultivariateNormal(0, covariance_matrix = KOO))
             numpyro.sample("likelihood",
-                           dist.Poisson(inc[:nobs] + training_resid),
-                           obs=y[:nobs])
-
-            # training_resid = numpyro.sample("likelihood",
-            #                                 dist.MultivariateNormal( inc[:nobs] , covariance_matrix = KOO) ,
-            #                                 obs=y[:nobs])
+                           dist.MultivariateNormal(0,covariance_matrix=KOO),
+                           obs=centered_y)
 
             # Compute conditional GP mean and covariance
+            L     = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
+            alpha = jax.scipy.linalg.solve_triangular(L, centered_y, lower=True)
+            alpha = jax.scipy.linalg.solve_triangular(L.T, alpha, lower=False)
 
-            
-            if forecast:
-                L     = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
-            
-                alpha = jax.scipy.linalg.solve_triangular(L  , resid, lower=True)
-                alpha = jax.scipy.linalg.solve_triangular(L.T, alpha, lower=False)
+            mean = KOT.T @ alpha
 
-                mean = KOT.T @ alpha
+            v = jax.scipy.linalg.solve_triangular(L, KOT, lower=True)
+            cov = KTT - v.T @ v
 
-                v    = jax.scipy.linalg.solve_triangular(L, KOT, lower=True)
-                cov  = KTT - v.T @ v
+            fitted_resid = numpyro.sample("fitted_resid", dist.MultivariateNormal(mean, covariance_matrix=cov))
+            final_resid  = jnp.concatenate([y[:nobs], fitted_resid + center ]) 
 
-                fitted_resid = numpyro.sample("fitted_resid", dist.MultivariateNormal(mean, covariance_matrix=cov))
-                final_resid  = jnp.concatenate([resid[:nobs], fitted_resid]) 
-
-                yhat_mean = numpyro.deterministic("yhat", inc + final_resid)
-            
-            #yhat      = numpyro.sample("yhat", dist.Poisson(inc + final_resid) )
-            #yhat      = numpyro.sample("yhat", dist.Normal( inc + final_resid, jnp.clip(inc + final_resid,10**-5,jnp.inf) ) )
-            
+            yhat = numpyro.deterministic("yhat", final_resid)
 
         # Run MCMC with NUTS sampler
         mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=5000, num_samples=5000)
@@ -202,7 +152,7 @@ class compartment_forecast_with_GP(object):
 
         mcmc.print_summary()
         samples = mcmc.get_samples()
-        #incs    = samples["yhat"]
+        incs    = samples["yhat"]
 
         # Generate posterior predictive samples using previously drawn MCMC samples
         from numpyro.infer import Predictive
@@ -213,10 +163,10 @@ class compartment_forecast_with_GP(object):
                                 ,return_sites=["yhat"])
 
         preds = predictive(jax.random.PRNGKey(2)
-                           ,y        = jnp.array(self.y)
-                           ,times    = jnp.array(self.times)
-                           ,N        = self.N
-                           ,forecast = True)
+                           ,y     = jnp.array(self.y)
+                           ,times = jnp.array(self.times)
+                           ,N     = self.N)
+
 
         yhats = preds["yhat"]
         
@@ -249,6 +199,7 @@ if __name__ == "__main__":
 
     #--Control model only uses X = time in the kernel
     X     = np.arange( 1,end+1 ).reshape(-1,1)
+    X     = np.hstack([X,X]) 
 
     #--model fit for control
     framework = compartment_forecast_with_GP(N       = 1000
@@ -277,9 +228,3 @@ if __name__ == "__main__":
     ax.plot(        weeks,middle                 ,lw=1.5, color=colors[0])
     
     plt.show()
-        
-
-    
-
-    
-
