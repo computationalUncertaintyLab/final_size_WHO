@@ -1,4 +1,4 @@
-#mcandrew
+# mcandrew
 
 import sys
 import numpy as np
@@ -9,229 +9,208 @@ from scipy.interpolate import interp1d
 
 import scienceplots
 
-
 class compartment_forecast_with_GP(object):
-    #--
+    # Initialize the forecasting framework
     def __init__(self
-                 , N                 = None
-                 , y                 = None
-                 , X                 = None 
-                 , times             = None
-                 , start             = None
-                 , end               = None
-                 , infectious_period = None):
+                 , N=None                 # Total population
+                 , y=None                 # Observed incident cases (with missing values)
+                 , X=None                 # Covariate matrix for GP kernel (e.g. time or other predictors)
+                 , times=None             # Array of time points
+                 , start=None, end=None   # Start and end time (used if times is None)
+                 , infectious_period=None):  # Fixed infectious period (used to derive gamma)
         
-        self.N                 = N
-        self.times             = times
+        self.N = N
+        self.times = times
         self.infectious_period = infectious_period
 
+        # Set time boundaries
         if times is not None:
             self.start = min(times)
             self.end   = max(times)
         else:
-            self.start, self.end   = start,end
+            self.start, self.end = start, end
 
         self.y = y
 
+        # Find first missing value in y to determine training length
         if y is not None:
             self.nobs = np.min(np.argwhere(np.isnan(y)))
         else:
             self.nobs = None
 
         self.X = X
-            
-    #--     
-    def simulation(self
-                   , I0               = None
-                   , repo             = None
-                   , dt               = 1./7):
 
+    # Simulate epidemic trajectories with a stochastic SIR model
+    def simulation(self, I0=None, repo=None, dt=1./7):
         import numpy as np
-        
-        #--simulation
-        N                 = self.N
+
+        N = self.N
         infectious_period = self.infectious_period
-        start, end        = self.start, self.end
-        
-        gamma   = 1./infectious_period
-        eps     = np.finfo(float).eps
+        start, end = self.start, self.end
+        gamma = 1. / infectious_period
 
-        S0, I0, R0, i0 = N-I0, I0, 0, I0
-        y              = [ (S0,I0,R0,i0) ]
+        S0, I0, R0, i0 = N - I0, I0, 0, I0
+        y = [(S0, I0, R0, i0)]
 
-        times     = np.linspace(start,end,(end-start)*int(1./dt))
-        T         = len(times)
+        # Time grid for simulation
+        times = np.linspace(start, end, (end - start) * int(1. / dt))
 
         for t in times:
-            S,I,R,i = y[-1]
-            beta = repo*gamma
+            S, I, R, i = y[-1]
+            beta = repo * gamma
 
-            infection = np.random.poisson( dt*(beta*S*I/N)  )
-            recover   = np.random.poisson( dt*(gamma*I) )
+            # Simulate infections and recoveries using Poisson noise
+            infection = np.random.poisson(dt * (beta * S * I / N))
+            recover = np.random.poisson(dt * (gamma * I))
 
-            S = np.clip(S - infection         ,0,N)
-            I = np.clip(I + infection-recover ,0,N)
-            R = np.clip(R + recover           ,0,N)
-            i+=infection
+            # Update compartments (clipped to [0, N])
+            S = np.clip(S - infection, 0, N)
+            I = np.clip(I + infection - recover, 0, N)
+            R = np.clip(R + recover, 0, N)
+            i += infection
 
-            y.append((S,I,R,i))
+            y.append((S, I, R, i))
 
-        S,I,R,i = zip(*y)
-        i       = np.diff(i)
+        S, I, R, i = zip(*y)
+        i = np.diff(i)  # Daily incident cases
 
-        return times,i, y
+        return times, i, y
 
-    def control_fit(self,dt = 1./7):
+    # Fit model to control scenario using NumPyro and GP residuals
+    def control_fit(self, dt=1./7):
         import jax
         import jax.numpy as jnp
-        
+
         import numpyro
         import numpyro.distributions as dist
         from numpyro.infer import MCMC, NUTS
+        from diffrax import diffeqsolve, ODETerm, Heun, SaveAt
 
-        from diffrax import diffeqsolve, ODETerm, Dopri5, Heun, SaveAt
-        
-        def model(y=None,times=None,N=None):
-            import jax.numpy as jnp
-            
+        def model(y=None, times=None, N=None):
+            # Define SIR ODE system
             def f(t, y, args):
-                S,I,R,i = y
+                S, I, R, i = y
                 repo, gamma, N = args
+                beta = repo * gamma
+                dS = -beta * S * I / N
+                dI = beta * S * I / N - gamma * I
+                dR = gamma * I
+                di = beta * S * I / N
+                return jnp.array([dS, dI, dR, di])
 
-                beta    = repo*gamma
-
-                dS = -beta*S*I/N
-                dI =  beta*S*I/N - gamma*I
-                dR =  gamma*I
-                di =  beta*S*I/N 
-                return jnp.array([dS,dI,dR,di])
-
-            I0 = numpyro.sample( "I0", dist.Beta(1,1) )
-            I0 = N*I0
+            # Sample initial infectious proportion and scale to population
+            I0 = numpyro.sample("I0", dist.Beta(1, 1))
+            I0 = N * I0
 
             infectious_period = self.infectious_period
-            gamma             = 1./infectious_period
+            gamma = 1. / infectious_period
 
-            repo              = numpyro.sample("repo", dist.Beta(1,1))
-            repo              = 5*repo 
+            # Sample reproduction rate (scaled by 5)
+            repo = numpyro.sample("repo", dist.Beta(1, 1))
+            repo = 5 * repo
 
-            saves             = SaveAt(ts = jnp.arange(-1.,self.end+1,1) )
+            # Solve ODE forward in time
+            saves = SaveAt(ts=jnp.arange(-1., self.end + 1, 1))
+            term = ODETerm(f)
+            solver = Heun()
+            y0 = jnp.array([N - I0, I0, 0, I0])
+            solution = diffeqsolve(term, solver, t0=-1, t1=self.end + 1, dt0=dt, y0=y0, saveat=saves, args=(repo, gamma, N))
 
-            term     = ODETerm(f)
-            solver   = Heun()
-            y0       = jnp.array([N-I0,I0,0,I0])
-            solution = diffeqsolve(term
-                                   , solver
-                                   , t0     = -1
-                                   , t1     = self.end+1
-                                   , dt0    = dt
-                                   , y0     = y0
-                                   , saveat = saves
-                                   , args   = (repo,gamma,N)
-                                   )
+            times = solution.ts[1:]
+            cinc = solution.ys[:, -1]  # cumulative incidence
+            inc = jnp.diff(cinc)       # incidence
 
-            times    = solution.ts[1:]
-            cinc     = solution.ys[:,-1]
-            inc      = jnp.diff(cinc)
+            nobs = self.nobs
+            inc = numpyro.deterministic("inc", inc)
 
-            nobs  = self.nobs
-            inc   = numpyro.deterministic("inc", inc)
+            resid = (y.reshape(-1,) - inc)[:nobs]
+            resid_center = jnp.nanmean(resid)
+            centered_resid = resid - resid_center
 
-            resid = (y.reshape(-1,)-inc)[:nobs]
-
-            resid_center   = jnp.nanmean(resid)
-            centered_resid = resid-resid_center
-
-            #--noise
-            #--Kernel
+            # Define RBF kernel (optional for multiple covariates)
             def rbf_kernel_ard(X1, X2, amplitude, lengthscales):
-                """
-                X1, X2: (n1, D), (n2, D)
-                lengthscales: (D,) array for each input dimension
-                """
                 X1_scaled = X1 / lengthscales
                 X2_scaled = X2 / lengthscales
-                dists     = jnp.sum((X1_scaled[:, None, :] - X2_scaled[None, :, :])**2, axis=-1)
+                dists = jnp.sum((X1_scaled[:, None, :] - X2_scaled[None, :, :])**2, axis=-1)
                 return amplitude**2 * jnp.exp(-0.5 * dists)
 
-            import jax.numpy as jnp
-
             def random_walk_kernel(X, X2=None, variance=1.0):
-                """
-                Random Walk (Brownian motion) kernel.
-
-                Args:
-                    X: [n,1] array of input locations.
-                    X2: [m,1] array of second input locations (or None for auto-kernel).
-                    variance: scalar variance σ².
-
-                Returns:
-                    [n,m] kernel matrix
-                """
                 if X2 is None:
                     X2 = X
                 return variance * jnp.minimum(X, X2.T)
 
-            #--The implication is that the first column of X is an integer that denotes
-            #--time step. For Example (time 0,1,2,3,4,...,end).
-            #-- A Random walk kernel is applied to the first column and RBF to remaining columns
-
-            noise = numpyro.sample("noise", dist.Beta(1.,1.) )
-            
+            noise = numpyro.sample("noise", dist.Beta(1., 1.))
             ncols = X.shape[-1]
-            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.) )
-            K1     = random_walk_kernel(X[:,0].reshape(-1,1), X[:,0].reshape(-1,1), rw_var )
+            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.))
+            K1 = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
 
-            if ncols>1:
-                amp   = numpyro.sample("amp"  , dist.Beta(1.,1.) )
-                leng  = numpyro.sample("leng" , dist.HalfCauchy(1.) )
-                K2    = rbf_kernel_ard(X[:,1:].reshape(-1,ncols-1), X[:,1:].reshape(-1,ncols-1), amp, leng )
-
-                K = K1+K2
+            # Optionally add RBF kernel if extra features exist
+            if ncols > 1:
+                amp = numpyro.sample("amp", dist.Beta(1., 1.))
+                leng = numpyro.sample("leng", dist.HalfCauchy(1.))
+                K2 = rbf_kernel_ard(X[:, 1:], X[:, 1:], amp, leng)
+                K = K1 + K2
             else:
-                K=K1
-            #---------------------------------------------------------------------------------------
-                
-            KOO   = K[:nobs ,:nobs] + (noise) * jnp.eye(nobs) 
-            KTT   = K[nobs: ,nobs:]
-            KOT   = K[:nobs ,nobs:]
+                K = K1
 
-            training_resid = numpyro.sample( "training_resid", dist.MultivariateNormal(0, KOO ) )
+            # Compute submatrices for GP residual conditioning
+            KOO = K[:nobs, :nobs] + noise * jnp.eye(nobs)
+            KTT = K[nobs:, nobs:]
+            KOT = K[:nobs, nobs:]
 
-            #--likelihood
-            numpyro.sample( "likelihood"
-                            , dist.Poisson( inc[:nobs].reshape(-1,) + (resid_center +  training_resid).reshape(-1,))
-                            , obs = y[:nobs].reshape(-1,)  )
+            training_resid = numpyro.sample("training_resid", dist.MultivariateNormal(0, KOO))
 
-            L     = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
+            # Poisson observation model on residual-corrected prediction
+            numpyro.sample("likelihood",
+                           dist.Poisson(inc[:nobs] + resid_center + training_resid),
+                           obs=y[:nobs])
+
+            # Compute conditional GP mean and covariance
+            L = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
             alpha = jax.scipy.linalg.solve_triangular(L, centered_resid, lower=True)
             alpha = jax.scipy.linalg.solve_triangular(L.T, alpha, lower=False)
-
             mean = KOT.T @ alpha
 
-            v   = jax.scipy.linalg.solve_triangular(L, KOT, lower=True)
+            v = jax.scipy.linalg.solve_triangular(L, KOT, lower=True)
             cov = KTT - v.T @ v
 
-            fitted_resid = numpyro.sample("fitted_resid", dist.MultivariateNormal(  mean  ,covariance_matrix=cov) )
-            final_resid  = jnp.concatenate([resid[:nobs],fitted_resid]) + resid_center 
-            
-            yhat         =  numpyro.deterministic( "yhat", inc.reshape(-1,) + final_resid.reshape(-1,) )
+            fitted_resid = numpyro.sample("fitted_resid", dist.MultivariateNormal(mean, covariance_matrix=cov))
+            final_resid = jnp.concatenate([resid[:nobs], fitted_resid]) + resid_center
 
-        mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=4*10**3, num_samples=5*10**3)
-        mcmc.run(jax.random.PRNGKey(1)
-                 , y     = jnp.array(self.y)
-                 , times = jnp.array(self.times)
-                 , N     = self.N
-        )
-        
+            yhat = numpyro.deterministic("yhat", inc + final_resid)
+
+        # Run MCMC with NUTS sampler
+        mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=4000, num_samples=5000)
+        mcmc.run(jax.random.PRNGKey(1), y=jnp.array(self.y), times=jnp.array(self.times), N=self.N)
+
         mcmc.print_summary()
         samples = mcmc.get_samples()
+        incs    = samples["yhat"]
 
-        incs = samples["yhat"]
+        # Generate posterior predictive samples using previously drawn MCMC samples
+        def predict(self, num_samples=1000):
+            import jax
+            import jax.numpy as jnp
+            from numpyro.infer import Predictive
+
+            # Define model as used in control_fit (reusing trace)
+            predictive = Predictive(self.control_fit.__closure__[0].cell_contents,
+                                    posterior_samples=self.samples,
+                                    return_sites=["yhat"])
+
+            preds = predictive(jax.random.PRNGKey(2),
+                               y=jnp.array(self.y),
+                               times=jnp.array(self.times),
+                               N=self.N)
+
+            return preds["yhat"]
+
+        yhats = predict(num_samples = 5000)
         
         self.samples = samples
-        return times,incs,samples
+        return times, yhats, samples
 
+    
 if __name__ == "__main__":
 
     np.random.seed(1010)
@@ -278,7 +257,7 @@ if __name__ == "__main__":
     ax.set_xlabel("MMWR week", fontsize=8)
     ax.set_ylabel("Incident cases", fontsize=8)
 
-    ax.axvline(10)
+    ax.axvline(9,color="black",ls="--")
     
     lower1,lower2,middle,upper2,upper1 = np.percentile(infections,[2.5,25,50,75,97.5],axis=0)
     ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[0])
