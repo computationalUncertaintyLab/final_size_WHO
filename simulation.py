@@ -190,9 +190,9 @@ class compartment_forecast_with_GP(object):
                 fitted_resid = numpyro.sample("fitted_resid", dist.MultivariateNormal(mean, covariance_matrix=cov))
                 final_resid  = jnp.concatenate([resid[:nobs], fitted_resid]) 
 
-                yhat_mean = numpyro.deterministic("yhat", inc + final_resid)
-            
-            #yhat      = numpyro.sample("yhat", dist.Poisson(inc + final_resid) )
+                yhat_mean = numpyro.deterministic("yhat_mean", inc + final_resid)
+                yhat      = numpyro.sample("yhat", dist.Poisson(jnp.clip(inc + final_resid,10**-5,jnp.inf) ) )
+                
             #yhat      = numpyro.sample("yhat", dist.Normal( inc + final_resid, jnp.clip(inc + final_resid,10**-5,jnp.inf) ) )
             
 
