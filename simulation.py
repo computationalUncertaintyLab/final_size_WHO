@@ -110,21 +110,25 @@ class compartment_forecast_with_GP(object):
             repo = 5 * repo
 
             # Solve ODE forward in time
-            saves = SaveAt(ts=jnp.arange(-1., self.end + 1, 1))
-            term = ODETerm(f)
-            solver = Heun()
-            y0 = jnp.array([N - I0, I0, 0, I0])
+            saves    = SaveAt(ts=jnp.arange(-1., self.end + 1, 1))
+
+            term     = ODETerm(f)
+            solver   = Heun()
+            
+            y0       = jnp.array([N - I0, I0, 0, I0])
             solution = diffeqsolve(term, solver, t0=-1, t1=self.end + 1, dt0=dt, y0=y0, saveat=saves, args=(repo, gamma, N))
 
             times = solution.ts[1:]
-            cinc = solution.ys[:, -1]  # cumulative incidence
-            inc = jnp.diff(cinc)       # incidence
+            cinc  = solution.ys[:, -1]  # cumulative incidence
 
+            inc   = jnp.diff(cinc)      # incidence
+            inc  = numpyro.deterministic("inc", inc)
+
+            #--setup residual vector
             nobs = self.nobs
-            inc = numpyro.deterministic("inc", inc)
 
-            resid = (y.reshape(-1,) - inc)[:nobs]
-            resid_center = jnp.nanmean(resid)
+            resid          = (y.reshape(-1,) - inc)[:nobs]
+            resid_center   = jnp.nanmean(resid)
             centered_resid = resid - resid_center
 
             # Define RBF kernel (optional for multiple covariates)
@@ -139,10 +143,10 @@ class compartment_forecast_with_GP(object):
                     X2 = X
                 return variance * jnp.minimum(X, X2.T)
 
-            noise = numpyro.sample("noise", dist.Beta(1., 1.))
-            ncols = X.shape[-1]
+            noise  = numpyro.sample("noise", dist.Beta(1., 1.))
+            ncols  = X.shape[-1]
             rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.))
-            K1 = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
+            K1     = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
 
             # Optionally add RBF kernel if extra features exist
             if ncols > 1:
@@ -166,9 +170,11 @@ class compartment_forecast_with_GP(object):
                            obs=y[:nobs])
 
             # Compute conditional GP mean and covariance
-            L = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
+            L     = jnp.linalg.cholesky(KOO + 1e-5 * jnp.eye(nobs))
+            
             alpha = jax.scipy.linalg.solve_triangular(L, centered_resid, lower=True)
             alpha = jax.scipy.linalg.solve_triangular(L.T, alpha, lower=False)
+
             mean = KOT.T @ alpha
 
             v = jax.scipy.linalg.solve_triangular(L, KOT, lower=True)
@@ -180,7 +186,7 @@ class compartment_forecast_with_GP(object):
             yhat = numpyro.deterministic("yhat", inc + final_resid)
 
         # Run MCMC with NUTS sampler
-        mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=4000, num_samples=5000)
+        mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=5000, num_samples=5000)
         mcmc.run(jax.random.PRNGKey(1), y=jnp.array(self.y), times=jnp.array(self.times), N=self.N)
 
         mcmc.print_summary()
@@ -188,24 +194,20 @@ class compartment_forecast_with_GP(object):
         incs    = samples["yhat"]
 
         # Generate posterior predictive samples using previously drawn MCMC samples
-        def predict(self, num_samples=1000):
-            import jax
-            import jax.numpy as jnp
-            from numpyro.infer import Predictive
+        from numpyro.infer import Predictive
 
-            # Define model as used in control_fit (reusing trace)
-            predictive = Predictive(self.control_fit.__closure__[0].cell_contents,
-                                    posterior_samples=self.samples,
-                                    return_sites=["yhat"])
+        # Define model as used in control_fit (reusing trace)
+        predictive = Predictive(model
+                                ,posterior_samples=samples
+                                ,return_sites=["yhat"])
 
-            preds = predictive(jax.random.PRNGKey(2),
-                               y=jnp.array(self.y),
-                               times=jnp.array(self.times),
-                               N=self.N)
+        preds = predictive(jax.random.PRNGKey(2)
+                           ,y     = jnp.array(self.y)
+                           ,times = jnp.array(self.times)
+                           ,N     = self.N)
 
-            return preds["yhat"]
 
-        yhats = predict(num_samples = 5000)
+        yhats = preds["yhat"]
         
         self.samples = samples
         return times, yhats, samples
