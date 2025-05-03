@@ -143,17 +143,17 @@ class compartment_forecast_with_GP(object):
                     X2 = X
                 return variance * jnp.minimum(X, X2.T)
 
-            noise  = numpyro.sample("noise", dist.Beta(1., 1.))
+            noise  = numpyro.sample("noise", dist.HalfCauchy(1.))
             ncols  = X.shape[-1]
-            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.))
+            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(10.))
             K1     = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
 
             # Optionally add RBF kernel if extra features exist
             if ncols > 1:
-                amp = numpyro.sample("amp", dist.Beta(1., 1.))
+                amp  = numpyro.sample("amp", dist.Beta(1., 1.))
                 leng = numpyro.sample("leng", dist.HalfCauchy(1.))
-                K2 = rbf_kernel_ard(X[:, 1:], X[:, 1:], amp, leng)
-                K = K1 + K2
+                K2   = rbf_kernel_ard(X[:, 1:], X[:, 1:], amp, leng)
+                K    = K1 + K2
             else:
                 K = K1
 
@@ -235,10 +235,10 @@ if __name__ == "__main__":
     weekly_infections[10:] = np.nan
 
     #--time paraemters
-    start,end = min(weeks), max(weeks)
+    start,end = min(weeks), max(weeks)+1
 
     #--Control model only uses X = time in the kernel
-    X     = np.arange( end+1 ).reshape(-1,1)
+    X     = np.arange( 1,end+1 ).reshape(-1,1)
 
     #--model fit for control
     framework = compartment_forecast_with_GP(N       = 1000
