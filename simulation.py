@@ -145,7 +145,7 @@ class compartment_forecast_with_GP(object):
 
             noise  = numpyro.sample("noise", dist.HalfCauchy(1.))
             ncols  = X.shape[-1]
-            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(10.))
+            rw_var = numpyro.sample("rw_var", dist.HalfCauchy(1.))
             K1     = random_walk_kernel(X[:, 0].reshape(-1, 1), variance=rw_var)
 
             # Optionally add RBF kernel if extra features exist
