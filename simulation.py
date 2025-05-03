@@ -191,7 +191,10 @@ class compartment_forecast_with_GP(object):
                 final_resid  = jnp.concatenate([resid[:nobs], fitted_resid]) 
 
                 yhat_mean = numpyro.deterministic("yhat_mean", inc + final_resid)
-                yhat      = numpyro.sample("yhat", dist.Poisson(jnp.clip(inc + final_resid,10**-5,jnp.inf) ) )
+                yhat_obs  = numpyro.sample("yhat_obs", dist.Poisson(jnp.clip( inc + final_resid,10**-5,jnp.inf) ) )
+                yhat      = numpyro.deterministic("yhat", jnp.concatenate( [yhat_mean[:nobs], yhat_obs[nobs:]])) 
+
+                print(len(yhat))
                 
             #yhat      = numpyro.sample("yhat", dist.Normal( inc + final_resid, jnp.clip(inc + final_resid,10**-5,jnp.inf) ) )
             
@@ -271,9 +274,10 @@ if __name__ == "__main__":
 
     ax.axvline(9,color="black",ls="--")
     
-    lower1,lower2,middle,upper2,upper1 = np.percentile(infections,[2.5,25,50,75,97.5],axis=0)
+    lower1,lower2,lower3,middle,upper3,upper2,upper1 = np.percentile(infections,[2.5, 10, 25,50,75,90,97.5],axis=0)
     ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[0])
-    ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[0])
+    ax.fill_between(weeks,lower2,upper2,alpha=0.2       ,color=colors[0])
+    ax.fill_between(weeks,lower2,upper2,alpha=0.2       ,color=colors[0])
     ax.plot(        weeks,middle                 ,lw=1.5, color=colors[0])
     
     plt.show()
