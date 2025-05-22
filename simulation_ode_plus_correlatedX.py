@@ -74,7 +74,7 @@ class compartment_forecast_with_GP(object):
         S, I, R, i = zip(*y)
         i = np.diff(i)  # Daily incident cases
 
-        return times, i, y
+        return times, i, np.random.poisson(y)
 
     # Fit model to control scenario using NumPyro and GP residuals
     def control_fit(self, dt=1./7):
@@ -86,7 +86,7 @@ class compartment_forecast_with_GP(object):
         from numpyro.infer import MCMC, NUTS
         from diffrax import diffeqsolve, ODETerm, Heun, SaveAt
 
-        def model(y=None, times=None, N=None, forecast = False):
+        def model(y=None, X = None, times=None, N=None, forecast = False):
             # Define SIR ODE system
             def f(t, y, args):
                 S, I, R, i = y
@@ -194,7 +194,11 @@ class compartment_forecast_with_GP(object):
 
         # Run MCMC with NUTS sampler
         mcmc = MCMC(NUTS(model, max_tree_depth=3), num_warmup=5000, num_samples=5000)
-        mcmc.run(jax.random.PRNGKey(1), y=jnp.array(self.y), times=jnp.array(self.times), N=self.N)
+        mcmc.run(jax.random.PRNGKey(1)
+                 , y=jnp.array(self.y)
+                 ,X        = jnp.array(self.X)
+                 , times=jnp.array(self.times)
+                 , N=self.N)
 
         mcmc.print_summary()
         samples = mcmc.get_samples()
@@ -210,6 +214,7 @@ class compartment_forecast_with_GP(object):
 
         preds = predictive(jax.random.PRNGKey(2)
                            ,y        = jnp.array(self.y)
+                           ,X        = jnp.array(self.X)
                            ,times    = jnp.array(self.times)
                            ,N        = self.N
                            ,forecast = True)
@@ -283,13 +288,13 @@ if __name__ == "__main__":
     ax.axvline(9,color="black",ls="--")
 
     #--wit the correlated column
-    framework = compartment_forecast_with_GP(N       = 1000
+    framework1 = compartment_forecast_with_GP(N       = 1000
                                              , times = weeks
                                              , y     = weekly_infections
                                              , X     = Xaugmented90
                                              , infectious_period = 2)
  
-    times,infections,samples = framework.control_fit()
+    times,infections,samples = framework1.control_fit()
     
     lower1,lower2,lower3,middle,upper3,upper2,upper1 = np.percentile(infections,[2.5, 10, 25,50,75,90,97.5],axis=0)
     ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[0])
@@ -299,13 +304,13 @@ if __name__ == "__main__":
 
 
     #--wit the correlated column
-    framework = compartment_forecast_with_GP(N       = 1000
+    framework2 = compartment_forecast_with_GP(N       = 1000
                                              , times = weeks
                                              , y     = weekly_infections
                                              , X     = Xaugmented10
                                              , infectious_period = 2)
  
-    times,infections,samples = framework.control_fit()
+    times,infections,samples = framework2.control_fit()
     
     lower1,lower2,lower3,middle,upper3,upper2,upper1 = np.percentile(infections,[2.5, 10, 25,50,75,90,97.5],axis=0)
     ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[1])
@@ -315,14 +320,13 @@ if __name__ == "__main__":
 
     
     #--without the correlated column
-    framework = compartment_forecast_with_GP(N       = 1000
+    framework3 = compartment_forecast_with_GP(N       = 1000
                                              , times = weeks
                                              , y     = weekly_infections
                                              , X     = X
                                              , infectious_period = 2)
  
-    times,infections,samples = framework.control_fit()
-
+    times,infections,samples = framework3.control_fit()
     
     lower1,lower2,lower3,middle,upper3,upper2,upper1 = np.percentile(infections,[2.5, 10, 25,50,75,90,97.5],axis=0)
     ax.fill_between(weeks,lower1,upper1,alpha=0.2       ,color=colors[2])
