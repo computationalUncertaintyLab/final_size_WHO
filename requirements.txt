@@ -1,0 +1,10 @@
+numpy
+scipy
+seaborn
+pandas
+epiweeks
+matplotlib
+numpyro
+statsmodels
+scienceplots
+diffrax
