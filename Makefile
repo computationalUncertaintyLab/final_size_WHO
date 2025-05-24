@@ -1,14 +1,13 @@
 #mcandrew
 
 PYTHON ?= python3 -W ignore
-STATES ?= 'all'
 
 VENV_DIR := .whoseason
 VENV_PYTHON := $(VENV_DIR)/bin/python -W ignore
 
 R ?= Rscript
 
-run: build_env format_data
+run: build_env format_WHO_data
 
 build_env:
 	@echo "build forecast environment"

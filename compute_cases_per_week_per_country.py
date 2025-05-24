@@ -46,8 +46,9 @@ if __name__ == "__main__":
     def add_up_cases(x):
         return pd.Series({"POS": np.nansum(x.INF_ALL), "NEG": np.nansum(x.INF_NEGATIVE), "TTL": np.nansum(x.SPEC_PROCESSED_NB)  })
 
-    season_level_data  = d.loc[(d.SEASON >=2009),:].groupby(["SEASON","HEMISPHERE"]).apply(add_up_cases).reset_index()
-    season_level_data = season_level_data.loc[season_level_data.SEASON!=-1]
+    season_level_data      = d.loc[(d.SEASON >=2009),:].groupby(["SEASON","HEMISPHERE"]).apply(add_up_cases).reset_index()
+    season_level_data      = season_level_data.loc[season_level_data.SEASON!=-1]
+    season_level_data["P"] = season_level_data.POS/season_level_data.TTL
 
     season_level_data.to_csv("./analysis_data/season_level_data.csv",index=False)
 
