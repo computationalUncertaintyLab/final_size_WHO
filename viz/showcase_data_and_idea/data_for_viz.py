@@ -9,6 +9,8 @@ from scipy.interpolate import interp1d
 
 import scienceplots
 
+import pickle
+
 class compartment_forecast_with_GP(object):
     # Initialize the forecasting framework
     def __init__(self
