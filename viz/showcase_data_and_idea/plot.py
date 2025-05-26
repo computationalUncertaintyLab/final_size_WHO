@@ -11,6 +11,8 @@ import scienceplots
 
 import seaborn as sns
 
+import pickle
+
 if __name__ == "__main__":
 
     d = pd.read_csv("./analysis_data/week_level_data.csv")
