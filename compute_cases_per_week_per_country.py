@@ -79,3 +79,7 @@ if __name__ == "__main__":
     week_level_data = week_level_data.merge(model_week, on = ["MMWRYR","MMWRWK"], how = "left")
 
     week_level_data.to_csv("./analysis_data/week_level_data.csv",index=False)
+
+    #--week and country level data
+    week_country_level_data = d.groupby(["WHOREGION","COUNTRY_CODE","COUNTRY_AREA_TERRITORY","HEMISPHERE","SEASON"]).apply(add_up_cases).reset_index()
+    week_country_level_data.to_csv("./analysis_data/week_country_level_data.csv",index=False)
