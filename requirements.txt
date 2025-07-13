@@ -8,3 +8,5 @@ numpyro
 statsmodels
 scienceplots
 diffrax
+cvxopt
+shap
