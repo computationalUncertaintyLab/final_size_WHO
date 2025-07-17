@@ -14,10 +14,11 @@ import xgboost as xgb
 
 if __name__ == "__main__":
 
-
     d = pd.read_csv("./analysis_data/week_country_level_data.csv")
     d = d.loc[ (d.SEASON != -1) & (d.SEASON != 2025) ,: ]
-    d["prop"] = (1+d.POS)/(1+d.TTL)
+    d = d.loc[d.SEASON >=2015]
+
+    d["prop"] = (d.POS+1) / (d.POS + d.NEG + 1)#(1+d.AH3)/(1+d.TTL)
 
     d = d.loc[ (d.HEMISPHERE == "SH") | (d.COUNTRY_CODE == "USA") ]
     d = d.loc[d.SEASON!=2020]

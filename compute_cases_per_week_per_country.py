@@ -14,6 +14,7 @@ if __name__ == "__main__":
             ,'COUNTRY_CODE','COUNTRY_AREA_TERRITORY'
             ,'ISO_WEEKSTARTDATE','MMWRYW'
             ,'SPEC_PROCESSED_NB'
+            ,"AH1", "AH3"
             ,'INF_ALL','INF_NEGATIVE']
     
     d = d[cols]
@@ -44,7 +45,11 @@ if __name__ == "__main__":
     d = d.loc[ (d.SEASON >=2009) | (d.SEASON==-1) ]
     
     def add_up_cases(x):
-        return pd.Series({"POS": np.nansum(x.INF_ALL), "NEG": np.nansum(x.INF_NEGATIVE), "TTL": np.nansum(x.SPEC_PROCESSED_NB)  })
+        return pd.Series({  "POS": np.nansum(x.INF_ALL)
+                          , "NEG": np.nansum(x.INF_NEGATIVE)
+                          , "AH1": np.nansum(x.AH1)
+                          , "AH3": np.nansum(x.AH3)
+                          , "TTL": np.nansum(x.SPEC_PROCESSED_NB)  })
 
     season_level_data      = d.loc[(d.SEASON >=2009),:].groupby(["SEASON","HEMISPHERE"]).apply(add_up_cases).reset_index()
     season_level_data      = season_level_data.loc[season_level_data.SEASON!=-1]
@@ -83,3 +88,4 @@ if __name__ == "__main__":
     #--week and country level data
     week_country_level_data = d.groupby(["WHOREGION","COUNTRY_CODE","COUNTRY_AREA_TERRITORY","HEMISPHERE","SEASON"]).apply(add_up_cases).reset_index()
     week_country_level_data.to_csv("./analysis_data/week_country_level_data.csv",index=False)
+
