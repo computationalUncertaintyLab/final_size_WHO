@@ -6,204 +6,242 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-if __name__ == "__main__":
+class model(object):
+    def __init__(self,y, prior_parameters_dataset, season, location):
+        self.y                        = y
+        self.T                        = len(y)
+        self.season                   = season
+        self.location                 = location
+        self.prior_parameters_dataset = prior_parameters_dataset
 
-    import jax.numpy as jnp
-    def d_generalized_logistic(t, A, K, B, M, Q=1.0, nu=1.0):
+    def d_generalized_logistic(self,t, A, K, B, M, Q=1.0, nu=1.0):
+        import jax
+        import jax.numpy as jnp
+        
         exp_term = jnp.exp(-B * (t - M))
         denom = (1 + Q * exp_term)
         return ((K - A) * B * Q * exp_term) / (nu * denom**(1/nu + 1))
-    
-    d = pd.read_csv("./models/prior_params.csv")
 
-    curves = {"t":[],"value":[],"sim":[],"location":[]}
-    times = np.arange(43)
-    for sim,(idx, row) in enumerate(d.iterrows()):
-        inc = -d_generalized_logistic(times
-                               ,row.A
-                               ,row.K
-                               ,row.B
-                               ,row.M
-                               ,row.Q
-                               ,row.nu)
-    
-        curves["value"].extend([ float(x) for x in inc])
-        curves["t"].extend(times)
-        curves["sim"].extend(43*[sim])
-        curves["location"].extend(43*[row.location])
+    def d2_generalized_logistic(self,t, A, K, B, M, Q=1.0, nu=1.0):
+        import jax.numpy as jnp
+
+        exp_term = jnp.exp(-B * (t - M))           # e^{-B(t - M)}
+        denom = 1 + Q * exp_term                   # 1 + Q e^{-B(t - M)}
+        r = 1 / nu + 1
+
+        base = ((K - A) * B * Q * exp_term) / (nu * denom**r)
+        correction = -B + ((r * Q * B**2 * exp_term) / denom)
+
+        return base * correction
+
+    def build_set_of_curves(self):
+        import numpy as np
+        import pandas as pd
         
-    curves = pd.DataFrame(curves)
+        d      = self.prior_parameters_dataset
 
-    import numpyro
-    numpyro.enable_x64(True)
-    import numpyro.distributions as dist
-    from   numpyro.infer import Predictive
+        def create_curve(row):
+            d_generalized_logistic = self.d_generalized_logistic
+            times  = np.arange(len(self.y))
+            inc = -d_generalized_logistic(times
+                                          ,float(row.A.iloc[0])
+                                          ,float(row.K.iloc[0])
+                                          ,float(row.B.iloc[0])
+                                          ,float(row.M.iloc[0])
+                                          ,float(row.Q.iloc[0])
+                                          ,float(row.nu.iloc[0]))
+            d = pd.DataFrame({"value": inc, "t":times})
+            return d
 
-    from numpyro.infer import MCMC, NUTS, init_to_value, init_to_median, init_to_sample,init_to_uniform
+        curves = d.groupby(["location","location_name","season"]).apply(create_curve).reset_index()
+        curves = curves[ ["location","location_name","season","t","value"] ]
 
-    import jax
-    import jax.numpy as jnp
+        self.set_of_curves = curves
+        return curves
 
-    def model(y,X,m,k):
-        numpyro.sample("f", dist.MultivariateNormal(m[:10],k[:10,:10]), obs = y.reshape(-1,))
+    def select_curves_to_use(self):
+        import pandas as pd
 
-    C = pd.pivot_table(index=['sim'],columns = ['t'],values=['value'], data=curves.loc[curves.location=="42"] ).to_numpy()
-    
-    m = C.mean(0)
-    k = np.cov(C.T)
-    s = C.std(0)
-
-    vaccine_effect = pd.read_csv("./models/vaccine_effectiveness.py")
-    vaccine_effect = vaccine_effect.loc[vaccine_effect.season.isin(["2021/2022","2022/2023","2023/2024"])]
- 
-    
-    
-    def genLogModel(data         = None
-                    , tobs       = None
-                    , priors     = {}
-                    , mn = None
-                    , sc = None
-                    , forecast   = False):
-
-        def d_generalized_logistic(t, A, K, B, M, Q=1.0, nu=1.0):
-            exp_term = jnp.exp(-B * (t - M))
-            denom = (1 + Q * exp_term)
-            return ((K - A) * B * Q * exp_term) / (nu * denom**(1/nu + 1))
+        curves   = self.set_of_curves
+        location = self.location
+        selected_curves = pd.pivot_table(  index     = ['location',"season"] #<--this identifies each (season, location) pair
+                                           , columns = ['t']
+                                           , values  = ['value']
+                                           , data    = curves.loc[curves.location==location] ).to_numpy()
+        self.selected_curves = selected_curves
+        return selected_curves
 
 
-        def d2_generalized_logistic(t, A, K, B, M, Q=1.0, nu=1.0):
-            """
-            Second derivative of the generalized logistic function (incidence acceleration).
+    def build_prior_for_params(self):
+        import numpy as np
+        import pandas as pd
+        
+        d        = self.prior_parameters_dataset
+        location = self.location
+        
+        priors_for_state = d.loc[(d.location == location) & (d.season!=self.season)]
+        prior_params     = {}
+        for col_name in priors_for_state[ ["B","M","Q","nu","N"] ]:
+            v = np.log(priors_for_state[col_name])
+            prior_params[col_name] = ( v.mean(), v.std())
+        self.prior_parameters_for_training = prior_params
+        return prior_params
 
-            Parameters
-            ----------
-            t : array-like
-                Time points.
-            A, K, B, M, Q, nu : float
-                Parameters of the generalized logistic function.
+    def train(self):
+        import numpyro
+        numpyro.enable_x64(True)
+        import numpyro.distributions as dist
+        from   numpyro.infer import Predictive
+        import jax
+        import jax.numpy as jnp
 
-            Returns
-            -------
-            array-like
-                Second derivative of the generalized logistic function at time t.
-            """
-            exp_term = jnp.exp(-B * (t - M))           # e^{-B(t - M)}
-            denom = 1 + Q * exp_term                   # 1 + Q e^{-B(t - M)}
-            r = 1 / nu + 1
+        from numpyro.infer import MCMC, NUTS#, init_to_value, init_to_median, init_to_sample,init_to_uniform
 
-            base = ((K - A) * B * Q * exp_term) / (nu * denom**r)
-            correction = -B + ((r * Q * B**2 * exp_term) / denom)
+        def genLogModel(  y                = None
+                        , tobs             = None
+                        , priors           = {}
+                        , mean_prior_curve = None
+                        , std_prior_curve  = None
+                        , forecast         = False):
 
-            return base * correction
+            #--prelim data and functions needed
+            d_generalized_logistic = self.d_generalized_logistic
 
+            times    = jnp.arange(1,len(y)+1)
+            y        = y.reshape(-1,)
+            
+            #--setup priors for gLogistic regression parameters
+            params = {"A":1}
+            
+            for v in ["B","M","Q","nu"]:
+                if v in priors:
+                    m,s       = priors.get(v)
+                    log_v     = numpyro.sample( v, dist.Normal(m,s) )
+                    params[v] = jnp.exp(log_v)
+                else:
+                    params[v] = numpyro.sample(v  , dist.LogNormal(-1,1) )
 
-        times = np.arange(1,data.shape[-1]+1)
-        nseasons = data.shape[0]
-
-        y      = data.reshape(-1,)
-        x      = jnp.arange(len(y))
-
-        params = {"A":1}
-        for v in ["B","M","Q","nu"]:
-            if v in priors:
-                m,s       = priors.get(v)
-                log_v     = numpyro.sample( v, dist.Normal(m,s) )
-                params[v] = jnp.exp(log_v)
+            if "K" in priors:
+                conc,mean = priors["K"]
+                params["K"]  = numpyro.sample("K"  , dist.Beta(conc*mean, conc*(1-mean) ) )
             else:
-                params[v] = numpyro.sample(v  , dist.LogNormal(-1,1) )
+                params["K"] = numpyro.sample("K"  , dist.Beta(1,1)       )
 
-        if "K" in priors:
-            conc,mean = priors["K"]
-            params["K"]  = numpyro.sample("K"  , dist.Beta(conc*mean, conc*(1-mean) ) )
-        else:
-            params["K"] = numpyro.sample("K"  , dist.Beta(1,1)       )
+            if "N" in priors:
+                m,s = priors["N"]
+                log_N  = numpyro.sample( "N", dist.Normal(m,2))
+                N      = jnp.exp(log_N)
+            else:
+                N      = numpyro.sample( "N", dist.LogNormal(jnp.log(10*10**3),1) )
 
-        sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-1,1))
-        random_walk  = numpyro.sample("random_walk" , dist.GaussianRandomWalk( sigma_f, len(y) ) )
-        params["B"]  = params["B"] + random_walk 
-        dS = jax.vmap(d_generalized_logistic, in_axes = (0,)+ (None,)*2 + (0,) + (None,)*3  )( times
-                                                                                               , params["A"]
-                                                                                               , params["K"]
-                                                                                               , params["B"]
-                                                                                               , params["M"]
-                                                                                               , params["Q"]
-                                                                                               , params["nu"]
-                                                                                              )
-        
+            #--The B parameter is time-varying and controls how fast the epidemic moves over time 
+            sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-1,1))
+            random_walk  = numpyro.sample("random_walk" , dist.GaussianRandomWalk( sigma_f, len(y) ) )
+            params["B"]  = params["B"] + random_walk
 
-        
-        if "N" in priors:
-            m,s = priors["N"]
-            log_N  = numpyro.sample( "N", dist.Normal(m,2))
-            N      = jnp.exp(log_N)
-        else:
-            N      = numpyro.sample( "N", dist.LogNormal(jnp.log(10*10**3),1) )
 
-        inc_p      = numpyro.deterministic("inc_p"     , -dS )
-        inc        = numpyro.deterministic("inc"       , jnp.clip( N*inc_p ,10**-6,jnp.inf ) )
-        peak_time  = numpyro.deterministic( "peak_time", jnp.argmax(inc_p) )
+            #--dS is the proportion of incident casesper week
+            dS = jax.vmap(d_generalized_logistic, in_axes = (0,)+ (None,)*2 + (0,) + (None,)*3  )( times
+                                                                                                   , params["A"]
+                                                                                                   , params["K"]
+                                                                                                   , params["B"]
+                                                                                                   , params["M"]
+                                                                                                   , params["Q"]
+                                                                                                   , params["nu"]
+                                                                                                  )
 
-        nany       = ~jnp.isnan(data.reshape(-1,))
-        numpyro.sample("ll2", dist.Normal(mn[tobs:],sc[tobs:]), obs = inc_p.reshape(-1,)[tobs:] )
+            #--create proportion of incident cases, number of incident cases, and extract attributes from this curve
+            inc_p      = numpyro.deterministic("inc_p"     , -dS.reshape(-1,) )
+            inc        = numpyro.deterministic("inc"       , jnp.clip( N*inc_p ,10**-6,jnp.inf ) )
+            peak_time  = numpyro.deterministic("peak_time" , jnp.argmax(inc_p) )
 
-        second_deriv =  jax.vmap(d2_generalized_logistic, in_axes = (0,)+ (None,)*2 + (0,) + (None,)*3  )( times
-                                                                                               , params["A"]
-                                                                                               , params["K"]
-                                                                                               , params["B"]
-                                                                                               , params["M"]
-                                                                                               , params["Q"]
-                                                                                               , params["nu"]
-                                                                                              )
-        #numpyro.sample("penalty", dist.Normal(0, 1), obs = second_deriv.sum())
-        inc_process = jnp.clip( N*inc_p.reshape(-1,) - (1./3) + (1./50), 10**-6,jnp.inf)
-        with numpyro.handlers.mask(mask=nany):
-            numpyro.sample("ll" , dist.Poisson(inc_process), obs = y)
+            #--This is a proposed correction for the Poisson
+            inc_corrected = jnp.clip( N*inc_p.reshape(-1,) - (1./3) + (1./50), 10**-6,jnp.inf)
 
-        if forecast:
-            numpyro.sample("forecast", dist.Poisson(inc_process))
+            #--Data likelihood
+            nany       = ~jnp.isnan(y.reshape(-1,))
+            with numpyro.handlers.mask(mask=nany):
+                numpyro.sample("ll__from_data" , dist.Poisson(inc), obs = y)
+                
+            #--Prior influenza from the shape of the curve where our current data is not yet observed
+            numpyro.sample("ll__from_prior", dist.Normal(mean_prior_curve[tobs:],std_prior_curve[tobs:]), obs = inc_p[tobs:] )
 
+            #--Forecast
+            if forecast:
+                numpyro.sample("forecast", dist.Poisson(inc))
+
+        y                = self.y
+        tobs             = np.min(np.argwhere(np.isnan(y))[0])
+
+        try:
+            priors           = self.prior_parameters_for_training
+        except AttributeError:
+            self.build_prior_for_params()
+            priors           = self.prior_parameters_for_training
+
+        try:
+            selected_curves = self.select_curves_to_use()
+        except AttributeError:
+            self.build_set_of_curves()
+            selected_curves = self.select_curves_to_use()
+
+        mean_prior_curve = selected_curves.mean(0)
+        std_prior_curve  = selected_curves.std(0)
+
+        #--MCMC training
+        mcmc = MCMC(NUTS(genLogModel), num_warmup=10*10**3, num_samples=10*10**3)
+        mcmc.run(jax.random.PRNGKey(1)
+                 , y                = y
+                 , tobs             = tobs
+                 , priors           = priors
+                 , mean_prior_curve = mean_prior_curve
+                 , std_prior_curve  = std_prior_curve)
+
+        mcmc.print_summary()
+
+        training_samples = mcmc.get_samples()
+
+        #--Forecast
+        predictive  = Predictive(genLogModel
+                                 , posterior_samples = training_samples
+                                 , return_sites = ["K","B","M","Q","nu","N","forecast","peak_time"])
+
+        predictions = predictive(jax.random.PRNGKey(10)
+                                 , forecast         = True
+                                 , y                = y
+                                 , tobs             = tobs
+                                 , priors           = priors
+                                 , mean_prior_curve = mean_prior_curve
+                                 , std_prior_curve  = std_prior_curve)
+        #--Save important objects
+        self.mcmc        = mcmc
+        self.predictions = predictions
+
+        return predictions["forecast"]
+
+
+if __name__ == "__main__":
+
+    import jax.numpy as jnp
+   
+    prior_parameters_dataset = pd.read_csv("./models/prior_params.csv")
 
     hosp_data = pd.read_csv("./analysis_data/us_hospital_data.csv")
 
-    y_full = hosp_data.loc[(hosp_data.location=="42") & (hosp_data.season=="2024/2025"), "value"].values
-    y = y_full.copy()
-    y[13:] = np.nan
-
-    priors_for_state = d.loc[d.location == "42"]
-    priors_for_state = priors_for_state.loc[ priors_for_state.season!="2024/2025" ]
-
-    prior_params = {}
-    for col_name in priors_for_state[ ["B","M","Q","nu","N"] ]:
-        v = np.log(priors_for_state[col_name])
-        prior_params[col_name] = ( v.mean(), v.std())
-        
+    T = 13
     
-    mcmc = MCMC(NUTS(genLogModel), num_warmup=10*10**3, num_samples=10*10**3)
-    mcmc.run(jax.random.PRNGKey(1)
-             ,data            = y
-             ,tobs            = np.min(np.argwhere(np.isnan(y))[0])
-             ,mn               = m[:34]
-             ,sc               = s[:34]
-             ,priors          = prior_params
-             )
+    y_full = hosp_data.loc[(hosp_data.location=="42") & (hosp_data.season=="2024/2025"), "value"].values
+    y      = y_full.copy()
+    y[T:]  = np.nan
 
-    mcmc.print_summary()
-
-    training_samples = mcmc.get_samples()
-
-    predictive  = Predictive(genLogModel
-                             , posterior_samples = training_samples
-                             , return_sites = ["K","B","M","Q","nu","N","forecast","peak_time"])
-
-    predictions = predictive(jax.random.PRNGKey(10)
-                             ,data     = y
-                             ,tobs     = np.min(np.argwhere(np.isnan(y))[0])
-                             ,priors   = prior_params
-                             ,mn        = m[:34]
-                             ,sc        = s[:34]
-                             ,forecast = True
-                             )
-    low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( predictions["forecast"], [2.5,10,25,50,75,90,97.5], axis=0 )
+    model = model(y = y
+                  , prior_parameters_dataset = prior_parameters_dataset
+                  , location = "42"
+                  , season = "2024/2025")
+    forecasted_inc = model.train()
+    
+   
+    low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( forecasted_inc, [2.5,10,25,50,75,90,97.5], axis=0 )
 
     times = np.arange(34)
     # plt.plot(times,  jnp.append( y[~np.isnan(y)], med))
@@ -222,8 +260,8 @@ if __name__ == "__main__":
     plt.fill_between(times,low3,high3,alpha=0.20,color="red")
 
     ax.plot( np.arange(34), y)
-    ax.scatter( np.arange(34)[:10], y_full[:10] , s=50, edgecolors='white', linewidths=2, zorder=3)
-    ax.scatter( np.arange(34)[10:], y_full[10:] , s=50, color="blue")
+    ax.scatter( np.arange(34)[:10], y_full[:T] , s=50, edgecolors='white', linewidths=2, zorder=3)
+    ax.scatter( np.arange(34)[10:], y_full[T:] , s=50, color="blue")
 
     plt.plot(past_data.values,color="0.40")
     
