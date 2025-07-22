@@ -7,13 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 class model(object):
-    def __init__(self,y, prior_parameters_dataset, season, location):
-        self.y                        = y
-        self.T                        = len(y)
-        self.season                   = season
-        self.location                 = location
-        self.prior_parameters_dataset = prior_parameters_dataset
-
+    def __init__(self):
+        pass
     def d_generalized_logistic(self,t, A, K, B, M, Q=1.0, nu=1.0):
         import jax
         import jax.numpy as jnp
@@ -87,7 +82,7 @@ class model(object):
         self.prior_parameters_for_training = prior_params
         return prior_params
 
-    def train(self):
+    def train(self,y, prior_parameters_dataset, season, location):
         import numpyro
         numpyro.enable_x64(True)
         import numpyro.distributions as dist
@@ -96,6 +91,12 @@ class model(object):
         import jax.numpy as jnp
 
         from numpyro.infer import MCMC, NUTS#, init_to_value, init_to_median, init_to_sample,init_to_uniform
+
+        self.y                        = y
+        self.T                        = len(y)
+        self.season                   = season
+        self.location                 = location
+        self.prior_parameters_dataset = prior_parameters_dataset
 
         def genLogModel(  y                = None
                         , tobs             = None
@@ -170,7 +171,6 @@ class model(object):
             if forecast:
                 numpyro.sample("forecast", dist.Poisson(inc))
 
-        y                = self.y
         tobs             = np.min(np.argwhere(np.isnan(y))[0])
 
         try:
@@ -220,6 +220,57 @@ class model(object):
         return predictions["forecast"]
 
 
+    def compute_cdf_of_value(forecast, observation):
+        from scipy.interpolate import interp1d as f
+
+        xs  = np.sort(forecast)
+        n   = len(xs)
+
+        if observation<min(xs):
+            return 0
+        elif observation>max(xs):
+            return 1
+        else:
+            return np.searchsorted(xs,observation,side="right")/n
+
+    def compute_cdfs( forecasts, observations ):
+        cdf_vals = []
+        for forecast,observation in zip(forecasts.T,observations):
+            cdf_val = compute_cdf_of_value( forecast, observation )
+            cdf_vals.append(cdf_val)
+        return cdf_vals
+            
+            
+    def build_offline_calibration_dataset(self, all_past_y_data, prior_parameters_dataset):
+
+        forecast_data = { "location":[], "season":[], "week_ahead":[], "obs":[], "Fobs":[], "Fmodel":[]}
+        for (location, season), season_data in all_past_y_data.groupby(["location","season"]):
+
+            y_full = season_data.value.values.reshape(-1,)
+            
+            for horizon in np.arange(6,len(season_data)):
+                subset = season_data.iloc[ :horizon, : ]
+
+                y                        = subset.value.values
+                prior_parameters_dataset = prior_parameters_dataset.loc[ (prior_parameters_dataset.location==location) & (prior_parameters_dataset.season!=season) ]
+                
+                forecasts = self.train( y
+                                        , prior_parameters_dataset
+                                        , season
+                                        , location)
+
+                
+                break
+            break
+        
+            self.
+        
+        
+
+
+    
+
+
 if __name__ == "__main__":
 
     import jax.numpy as jnp
@@ -227,6 +278,7 @@ if __name__ == "__main__":
     prior_parameters_dataset = pd.read_csv("./models/prior_params.csv")
 
     hosp_data = pd.read_csv("./analysis_data/us_hospital_data.csv")
+    hosp_data = hosp_data.loc[hosp_data.season!="2020/2021"]
 
     T = 13
     
@@ -234,11 +286,11 @@ if __name__ == "__main__":
     y      = y_full.copy()
     y[T:]  = np.nan
 
-    model = model(y = y
-                  , prior_parameters_dataset = prior_parameters_dataset
-                  , location = "42"
-                  , season = "2024/2025")
-    forecasted_inc = model.train()
+    model = model()
+    forecasted_inc = model.train(y = y
+                                 , prior_parameters_dataset = prior_parameters_dataset
+                                 , location = "42"
+                                 , season = "2024/2025")
     
    
     low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( forecasted_inc, [2.5,10,25,50,75,90,97.5], axis=0 )
@@ -260,8 +312,8 @@ if __name__ == "__main__":
     plt.fill_between(times,low3,high3,alpha=0.20,color="red")
 
     ax.plot( np.arange(34), y)
-    ax.scatter( np.arange(34)[:10], y_full[:T] , s=50, edgecolors='white', linewidths=2, zorder=3)
-    ax.scatter( np.arange(34)[10:], y_full[T:] , s=50, color="blue")
+    ax.scatter( np.arange(34)[:T], y_full[:T] , s=50, edgecolors='white', linewidths=2, zorder=3)
+    ax.scatter( np.arange(34)[T:], y_full[T:] , s=50, color="blue")
 
     plt.plot(past_data.values,color="0.40")
     
