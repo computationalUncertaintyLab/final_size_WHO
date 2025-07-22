@@ -240,7 +240,6 @@ class model(object):
             cdf_vals.append(cdf_val)
         return cdf_vals
             
-            
     def build_offline_calibration_dataset(self, all_past_y_data, prior_parameters_dataset):
 
         forecast_data = { "location":[], "season":[], "week_ahead":[], "obs":[], "Fobs":[], "Fmodel":[]}
@@ -259,9 +258,9 @@ class model(object):
                                         , season
                                         , location)
 
+                model_cdf_vals        = compute_cdfs(forecasts,y_full)
+                empirical_cdf_vals    = compute_cdfs(np.repeat(y_full.reshape(-1,1),34,axis=1)   ,y_full)
                 
-                break
-            break
         
             self.
         
