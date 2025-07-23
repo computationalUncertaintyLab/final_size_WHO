@@ -171,7 +171,10 @@ class model(object):
             if forecast:
                 numpyro.sample("forecast", dist.Poisson(inc))
 
-        tobs             = np.min(np.argwhere(np.isnan(y))[0])
+        try:
+            tobs             = np.min(np.argwhere(np.isnan(y))[0])
+        except IndexError:
+            tobs = len(y)
 
         try:
             priors           = self.prior_parameters_for_training
@@ -220,7 +223,7 @@ class model(object):
         return predictions["forecast"]
 
 
-    def compute_cdf_of_value(forecast, observation):
+    def compute_cdf_of_value(self, forecast, observation):
         from scipy.interpolate import interp1d as f
 
         xs  = np.sort(forecast)
@@ -233,42 +236,67 @@ class model(object):
         else:
             return np.searchsorted(xs,observation,side="right")/n
 
-    def compute_cdfs( forecasts, observations ):
+    def compute_cdfs( self, forecasts, observations ):
         cdf_vals = []
         for forecast,observation in zip(forecasts.T,observations):
-            cdf_val = compute_cdf_of_value( forecast, observation )
+            cdf_val = self.compute_cdf_of_value( forecast, observation )
             cdf_vals.append(cdf_val)
         return cdf_vals
             
-    def build_offline_calibration_dataset(self, all_past_y_data, prior_parameters_dataset):
+    def build_offline_calibration_dataset(self, all_past_y_data, prior_parameters_dataset, outpath):
+        from joblib import Parallel, delayed
+        
+        #forecast_data = pd.DataFrame()
+        groups  = all_past_y_data.groupby(["location","season"])
+        ngroups = groups.ngroups
+        
+        for n, ( (location, season), season_data) in enumerate(groups):
 
-        forecast_data = { "location":[], "season":[], "week_ahead":[], "obs":[], "Fobs":[], "Fmodel":[]}
-        for (location, season), season_data in all_past_y_data.groupby(["location","season"]):
-
-            y_full = season_data.value.values.reshape(-1,)
+            print("{:d}/{:d}".format(n,ngroups))
             
-            for horizon in np.arange(6,len(season_data)):
+            y_full = season_data.value.values.reshape(-1,)
+            L      = len(y_full)
+
+            def compute_forecast_cdf(season_data, prior_parameters_dataset, season, location, horizon):
+                cdf_data = { "location":[], "season":[], "horizon":[], "week_ahead":[], "obs":[], "Fobs":[], "Fmodel":[]}
+                
                 subset = season_data.iloc[ :horizon, : ]
 
-                y                        = subset.value.values
+                y                        = np.append( subset.value.values, np.ones( len(y_full) - len(subset) )*np.nan)
+                
                 prior_parameters_dataset = prior_parameters_dataset.loc[ (prior_parameters_dataset.location==location) & (prior_parameters_dataset.season!=season) ]
                 
-                forecasts = self.train( y
-                                        , prior_parameters_dataset
-                                        , season
-                                        , location)
+                forecasts = self.train( y                          = y
+                                        , prior_parameters_dataset = prior_parameters_dataset
+                                        , season                   = season
+                                        , location                 = location)
 
-                model_cdf_vals        = compute_cdfs(forecasts,y_full)
-                empirical_cdf_vals    = compute_cdfs(np.repeat(y_full.reshape(-1,1),34,axis=1)   ,y_full)
+                model_cdf_vals        = self.compute_cdfs(forecasts,y_full)
+                empirical_cdf_vals    = self.compute_cdfs(np.repeat(y_full.reshape(-1,1),L,axis=1)   ,y_full)
                 
-        
-            self.
-        
-        
+                cdf_data["location"].extend( [location]*L )
+                cdf_data["season"].extend( [season]*L )
+                cdf_data["horizon"].extend([horizon]*L)
+                cdf_data["week_ahead"].extend( np.arange(L) - horizon )
+                cdf_data["obs"].extend( y )
+                cdf_data["Fobs"].extend(empirical_cdf_vals)
+                cdf_data["Fmodel"].extend(model_cdf_vals)
 
+                cdf_data = pd.DataFrame(cdf_data)
+                
+                return cdf_data
 
-    
+            cdf_data = Parallel(n_jobs=-1)(delayed(compute_forecast_cdf)(season_data, prior_parameters_dataset, season, location, horizon) for horizon in np.arange(6,len(season_data)) )
+            cdf_data = pd.concat(cdf_data)
 
+            if n==0:
+                cdf_data.to_csv("{:s}".format(outpath), index=False, mode="w",header=True)
+            else:
+                cdf_data.to_csv("{:s}".format(outpath), index=False, mode="a",header=False)
+            #forecast_data = pd.concat([forecast_data,cdf_data])
+            
+        #self.forecast_calibration_data = forecast_data
+        #return forecast_data
 
 if __name__ == "__main__":
 
@@ -286,42 +314,49 @@ if __name__ == "__main__":
     y[T:]  = np.nan
 
     model = model()
-    forecasted_inc = model.train(y = y
-                                 , prior_parameters_dataset = prior_parameters_dataset
-                                 , location = "42"
-                                 , season = "2024/2025")
+
+    model.build_offline_calibration_dataset( all_past_y_data = hosp_data
+                                             , prior_parameters_dataset = prior_parameters_dataset
+                                             , outpath =  "./models/calibration_data.csv"
+                                             )
+
+    
+    # forecasted_inc = model.train(y = y
+    #                              , prior_parameters_dataset = prior_parameters_dataset
+    #                              , location = "42"
+    #                              , season = "2024/2025")
     
    
-    low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( forecasted_inc, [2.5,10,25,50,75,90,97.5], axis=0 )
+    # low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( forecasted_inc, [2.5,10,25,50,75,90,97.5], axis=0 )
 
-    times = np.arange(34)
-    # plt.plot(times,  jnp.append( y[~np.isnan(y)], med))
-    # plt.fill_between(times,jnp.append( y[~np.isnan(y)], low1),jnp.append( y[~np.isnan(y)], high1),alpha=0.20,color="blue")
-    # plt.fill_between(times,jnp.append( y[~np.isnan(y)], low2),jnp.append( y[~np.isnan(y)], high2),alpha=0.20,color="blue")
+    # times = np.arange(34)
+    # # plt.plot(times,  jnp.append( y[~np.isnan(y)], med))
+    # # plt.fill_between(times,jnp.append( y[~np.isnan(y)], low1),jnp.append( y[~np.isnan(y)], high1),alpha=0.20,color="blue")
+    # # plt.fill_between(times,jnp.append( y[~np.isnan(y)], low2),jnp.append( y[~np.isnan(y)], high2),alpha=0.20,color="blue")
 
-    past_data = hosp_data.loc[(hosp_data.location=="42") ]
-    past_data = pd.pivot_table(index= ["model_week"], columns = ["season"], values = ["value"], data = past_data)
+    # past_data = hosp_data.loc[(hosp_data.location=="42") ]
+    # past_data = pd.pivot_table(index= ["model_week"], columns = ["season"], values = ["value"], data = past_data)
  
     
-    fig, ax = plt.subplots()
+    # fig, ax = plt.subplots()
     
-    plt.plot(times,med, color="red")
-    plt.fill_between(times,low1,high1,alpha=0.20,color="red")
-    plt.fill_between(times,low2,high2,alpha=0.20,color="red")
-    plt.fill_between(times,low3,high3,alpha=0.20,color="red")
+    # plt.plot(times,med, color="red")
+    # plt.fill_between(times,low1,high1,alpha=0.20,color="red")
+    # plt.fill_between(times,low2,high2,alpha=0.20,color="red")
+    # plt.fill_between(times,low3,high3,alpha=0.20,color="red")
 
-    ax.plot( np.arange(34), y)
-    ax.scatter( np.arange(34)[:T], y_full[:T] , s=50, edgecolors='white', linewidths=2, zorder=3)
-    ax.scatter( np.arange(34)[T:], y_full[T:] , s=50, color="blue")
+    # ax.plot( np.arange(34), y)
+    # ax.scatter( np.arange(34)[:T], y_full[:T] , s=50, edgecolors='white', linewidths=2, zorder=3)
+    # ax.scatter( np.arange(34)[T:], y_full[T:] , s=50, color="blue")
 
-    plt.plot(past_data.values,color="0.40")
+    # plt.plot(past_data.values,color="0.40")
     
-    ax.set_xlabel("MMWR Week")
-    ax.set_ylabel("Inc. Hosps. for PA")
+    # ax.set_xlabel("MMWR Week")
+    # ax.set_ylabel("Inc. Hosps. for PA")
 
-    ax.set_xticks([0,9,22,32])
-    ax.set_xticklabels(["40","50","10","20"])
+    # ax.set_xticks([0,9,22,32])
+    # ax.set_xticklabels(["40","50","10","20"])
 
    
-    plt.show()
+    # plt.show()
  
