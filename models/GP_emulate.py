@@ -223,7 +223,7 @@ class model(object):
         return predictions["forecast"]
 
 
-    def compute_cdf_of_value(self, forecast, observation):
+    def compute_cdf_of_value(forecast, observation):
         from scipy.interpolate import interp1d as f
 
         xs  = np.sort(forecast)
@@ -236,10 +236,10 @@ class model(object):
         else:
             return np.searchsorted(xs,observation,side="right")/n
 
-    def compute_cdfs( self, forecasts, observations ):
+    def compute_cdfs( forecasts, observations ):
         cdf_vals = []
         for forecast,observation in zip(forecasts.T,observations):
-            cdf_val = self.compute_cdf_of_value( forecast, observation )
+            cdf_val = compute_cdf_of_value( forecast, observation )
             cdf_vals.append(cdf_val)
         return cdf_vals
             
@@ -271,8 +271,8 @@ class model(object):
                                         , season                   = season
                                         , location                 = location)
 
-                model_cdf_vals        = self.compute_cdfs(forecasts,y_full)
-                empirical_cdf_vals    = self.compute_cdfs(np.repeat(y_full.reshape(-1,1),L,axis=1)   ,y_full)
+                model_cdf_vals        = np.array(self.compute_cdfs(forecasts,y_full))
+                empirical_cdf_vals    = self.compute_cdfs( np.repeat(model_cdf_vals.reshape(-1,1),L,axis=1), model_cdf_vals)
                 
                 cdf_data["location"].extend( [location]*L )
                 cdf_data["season"].extend( [season]*L )
@@ -293,10 +293,18 @@ class model(object):
                 cdf_data.to_csv("{:s}".format(outpath), index=False, mode="w",header=True)
             else:
                 cdf_data.to_csv("{:s}".format(outpath), index=False, mode="a",header=False)
-            #forecast_data = pd.concat([forecast_data,cdf_data])
-            
-        #self.forecast_calibration_data = forecast_data
-        #return forecast_data
+
+
+    def build_calibration_function(self, inpath):
+        calibration_data = pd.read_csv(inpath)
+
+        state_data = calibration_data.loc[ (calibration_data.location == location) & (calibration_data.week_ahead>0)]
+        
+        
+        
+        
+
+                
 
 if __name__ == "__main__":
 
@@ -321,10 +329,10 @@ if __name__ == "__main__":
                                              )
 
     
-    # forecasted_inc = model.train(y = y
-    #                              , prior_parameters_dataset = prior_parameters_dataset
-    #                              , location = "42"
-    #                              , season = "2024/2025")
+    forecasted_inc = model.train(y = y
+                                 , prior_parameters_dataset = prior_parameters_dataset
+                                 , location = "42"
+                                 , season = "2024/2025")
     
    
     # low1,low2,low3,med,high3,high2,high1 = np.nanpercentile( forecasted_inc, [2.5,10,25,50,75,90,97.5], axis=0 )
