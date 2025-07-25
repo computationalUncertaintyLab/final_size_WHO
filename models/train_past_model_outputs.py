@@ -22,8 +22,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--SEASON', type=str)
     parser.add_argument('--LOCATION', type=str)
-    
+
     args = parser.parse_args()
+    LOCATION = args.LOCATION
+    SEASON   = args.SEASON.replace("_","/") 
 
     subset_data = hosp_data.loc[(hosp_data.season==args.SEASON) &(hosp_data.location==args.LOCATION),: ]
     

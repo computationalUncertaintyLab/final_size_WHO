@@ -16,10 +16,6 @@
  
 cd ${SLURM_SUBMIT_DIR} # cd to directory where you submitted the job
  
-#--launch job
-
-python -V
-
 #--export environmental variables
 export LOCATION=${LOCATION}
 export TIME=${TIME}
