@@ -10,3 +10,6 @@ scienceplots
 diffrax
 cvxopt
 shap
+jax==0.4.38
+argparse
+joblib
