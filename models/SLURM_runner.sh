@@ -25,7 +25,7 @@ pwd
 
 python -m venv .whoseason
 source .whoseason/bin/activate
-python -r requirements.txt
+pip install -r requirements.txt
 
 .whoseason/bin/python3 ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
  
