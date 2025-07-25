@@ -28,7 +28,7 @@ if __name__ == "__main__":
     subset_data = hosp_data.loc[(hosp_data.season==args.SEASON) &(hosp_data.location==args.LOCATION),: ]
     
     for model_week in subset_data.model_week.unique():
-        quantile_data = {"location":[],"season":[],"model_week":[],"mmwr_yr":[],"mmwr_wk":[],"mmwr_enddate":[],"quantile":[],"quantile_value":[]}
+        quantile_data = {"location":[],"season":[],"model_week":[],"forecast_week":[],"mmwr_yr":[],"mmwr_wk":[],"mmwr_enddate":[],"quantile":[],"quantile_value":[]}
 
         data = subset_data.loc[subset_data.model_week <= model_week]
         
@@ -42,23 +42,25 @@ if __name__ == "__main__":
                                      , location = args.LOCATION
                                      , season   = args.SEASON)
 
-        percentiles = np.arange(0,100+1,1)
-        quantiles   = percentiles/100 
+        percentiles     = np.arange(0,100+1,1)
+        quantiles       = percentiles/100 
         quantile_values = np.percentile( forecasted_inc,percentiles,axis=0 )
 
+        for week, quantile_value in enumerate(quantile_values.T):
+            last_row = data.iloc[-1]
+            L        = len(quantiles) 
+            quantile_data["location"].extend([args.LOCATION]*L)
+            quantile_data["season"].extend([args.SEASON]*L)
 
-        last_row = data.iloc[-1]
-        L        = len(quantiles) 
-        quantile_data["location"].extend([args.LOCATION]*L)
-        quantile_data["season"].extend([args.SEASON]*L)
+            quantile_data["model_week"].extend(  [last_row["model_week"]  ]*L)
+            quantile_data["forecast_week"].extend(  [week]*L)
+            
+            quantile_data["mmwr_yr"].extend(     [last_row["mmwr_yr"]     ]*L)
+            quantile_data["mmwr_wk"].extend(     [last_row["mmwr_wk"]     ]*L)
+            quantile_data["mmwr_enddate"].extend([last_row["mmwr_enddate"]]*L)
 
-        quantile_data["model_week"].extend(  [last_row["model_week"]  ]*L)
-        quantile_data["mmwr_yr"].extend(     [last_row["mmwr_yr"]     ]*L)
-        quantile_data["mmwr_wk"].extend(     [last_row["mmwr_wk"]     ]*L)
-        quantile_data["mmwr_enddate"].extend([last_row["mmwr_enddate"]]*L)
-        
-        quantile_data["quantile"].extend( quantiles )
-        quantile_data["quantile_value"].extend(quantile_values)
+            quantile_data["quantile"].extend( quantiles )
+            quantile_data["quantile_value"].extend(quantile_value)
 
         quantile_data = pd.DataFrame(quantile_data)
 
