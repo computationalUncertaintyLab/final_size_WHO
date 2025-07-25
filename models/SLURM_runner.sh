@@ -18,9 +18,9 @@ cd ${SLURM_SUBMIT_DIR} # cd to directory where you submitted the job
  
 #--export environmental variables
 export LOCATION=${LOCATION}
-export TIME=${TIME}
+export SEASON=${SEASON}
 
-echo ${LOCATION} - ${TIME}
+echo ${LOCATION} - ${SEASON}
 
 .whoseason/bin/python3 ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
  
