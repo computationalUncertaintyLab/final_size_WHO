@@ -3,7 +3,7 @@
 #SBATCH --partition=haswell,hawkcpu,rapids
  
 #--Request 1 hour of computing time
-#SBATCH --time=07:30:00
+#SBATCH --time=03:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
