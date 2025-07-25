@@ -27,6 +27,8 @@ python -m venv .whoseason
 source .whoseason/bin/activate
 pip install -r requirements.txt
 
+pip install --no-binary=:all: jax jaxlib==0.4.38
+
 python ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
  
 exit
