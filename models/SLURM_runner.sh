@@ -23,12 +23,17 @@ export SEASON=${SEASON}
 echo ${LOCATION} - ${SEASON}
 pwd
 
+module load arch/cascade24v2
+module load intel/2025.0.0
+module load python/3.9.19
+
 python -m venv .whoseason
 source .whoseason/bin/activate
-pip install -r requirements.txt
 
 pip uninstall -y jax jaxlib
-pip install --no-binary=:all: jax jaxlib==0.4.38
+pip install --no-binary=:all: jax jaxlib==0.4.26
+
+pip install -r requirements.txt
 
 python ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
  
