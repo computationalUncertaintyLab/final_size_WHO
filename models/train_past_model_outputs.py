@@ -65,7 +65,7 @@ if __name__ == "__main__":
         quantile_data = pd.DataFrame(quantile_data)
 
         path = "./models/arxiv_cdfs.csv"
-        fout = Path()
+        fout = Path(path)
         if fout.is_file():
             quantile_data.to_csv(path, index=False, mode="a", header=False)
         else:
