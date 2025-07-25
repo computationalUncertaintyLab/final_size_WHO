@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --partition=health,lts,hawkcpu,infolab,engi,eng
+#SBATCH --partition=haswell,hawkcpu,rapids
  
 #--Request 1 hour of computing time
 #SBATCH --time=07:30:00
