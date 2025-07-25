@@ -14,5 +14,5 @@
 #SBATCH --output="myjob.%j.%N.out"
  
 cd ${SLURM_SUBMIT_DIR} # cd to directory where you submitted the job
-bash ./models/distributor__infinity.sh ./models/SLURM_runner.sh ./models/iteration_list.csv
+bash ./models/distributor__inf.sh ./models/SLURM_runner.sh ./models/iteration_list.csv
 exit
