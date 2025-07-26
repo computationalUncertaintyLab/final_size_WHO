@@ -27,7 +27,7 @@ if __name__ == "__main__":
     LOCATION = args.LOCATION
     SEASON   = args.SEASON.replace("_","/") 
 
-    subset_data = hosp_data.loc[(hosp_data.season==args.SEASON) &(hosp_data.location==args.LOCATION),: ]
+    subset_data = hosp_data.loc[(hosp_data.season==SEASON) &(hosp_data.location==LOCATION),: ]
 
     print("Length")
     print(len(subset_data))
