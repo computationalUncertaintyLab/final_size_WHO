@@ -24,6 +24,8 @@ echo ${LOCATION} - ${SEASON}
 pwd
 
 
+.test/bin/python3.13 -c "print('hello from python')"
+
 .test/bin/python ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
 
 echo "Python script completed with exit code $?"
