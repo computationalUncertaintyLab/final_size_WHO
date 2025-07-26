@@ -24,5 +24,7 @@ echo ${LOCATION} - ${SEASON}
 pwd
 
 .whoseason/bin/python3.13 ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
- 
+
+echo "complete"
+
 exit
