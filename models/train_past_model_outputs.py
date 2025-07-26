@@ -44,8 +44,8 @@ if __name__ == "__main__":
         
         forecasted_inc = model_instance.train(y = y
                                      , prior_parameters_dataset = prior_parameters_dataset
-                                     , location = args.LOCATION
-                                     , season   = args.SEASON)
+                                     , location = LOCATION
+                                     , season   = SEASON)
 
         percentiles     = np.arange(0,100+1,1)
         quantiles       = percentiles/100 
@@ -54,8 +54,8 @@ if __name__ == "__main__":
         for week, quantile_value in enumerate(quantile_values.T):
             last_row = data.iloc[-1]
             L        = len(quantiles) 
-            quantile_data["location"].extend([args.LOCATION]*L)
-            quantile_data["season"].extend([args.SEASON]*L)
+            quantile_data["location"].extend([LOCATION]*L)
+            quantile_data["season"].extend([SEASON]*L)
 
             quantile_data["model_week"].extend(  [last_row["model_week"]  ]*L)
             quantile_data["forecast_week"].extend(  [week]*L)
