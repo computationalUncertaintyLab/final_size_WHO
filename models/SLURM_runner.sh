@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --partition=haswell,hawkcpu,rapids
+#SBATCH --partition=hawkcpu
  
 #--Request 1 hour of computing time
 #SBATCH --time=03:30:00
@@ -13,7 +13,7 @@
  
 #--Write Standard Output and Error
 #SBATCH --output="myjob.%j.%N.out"
- 
+
 cd ${SLURM_SUBMIT_DIR} # cd to directory where you submitted the job
  
 #--export environmental variables
@@ -23,18 +23,6 @@ export SEASON=${SEASON}
 echo ${LOCATION} - ${SEASON}
 pwd
 
-module load arch/cascade24v2
-module load intel/2025.0.0
-module load python/3.9.19
-
-python -m venv .whoseason
-source .whoseason/bin/activate
-
-pip uninstall -y jax jaxlib
-pip install --no-binary=:all: jax jaxlib==0.4.26
-
-pip install -r requirements.txt
-
-python ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
+.whoseason/bin/python3.13 ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
  
 exit
