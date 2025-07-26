@@ -23,8 +23,10 @@ export SEASON=${SEASON}
 echo ${LOCATION} - ${SEASON}
 pwd
 
-.test/bin/python3.13 ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
 
+.test/bin/python ./models/train_past_model_outputs.py --LOCATION ${LOCATION} --SEASON ${SEASON}
+
+echo "Python script completed with exit code $?"
 echo "complete"
 
 exit
