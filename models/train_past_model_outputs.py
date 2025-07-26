@@ -31,6 +31,8 @@ if __name__ == "__main__":
 
     print("Length")
     print(len(subset_data))
+    print(SEASON)
+    print(LOCATION)
     
     for model_week in subset_data.model_week.unique():
         quantile_data = {"location":[],"season":[],"model_week":[],"forecast_week":[],"mmwr_yr":[],"mmwr_wk":[],"mmwr_enddate":[],"quantile":[],"quantile_value":[]}
