@@ -233,7 +233,6 @@ class model(object):
             ps  = np.arange(0,n+1)/n 
             
             return xs[ np.argmin(abs(p-ps)) ] #np.searchsorted(xs,observation,side="right")/n
-
     
     def compute_cdf_of_value(self,forecast, observation):
         from scipy.interpolate import interp1d as f
@@ -309,15 +308,91 @@ class model(object):
             else:
                 cdf_data.to_csv("{:s}".format(outpath), index=False, mode="a",header=False)
 
-
     def build_calibration_function(self, inpath):
-        calibration_data = pd.read_csv(inpath)
+        import numpy as np
+        import pandas as pd
+        from sklearn.isotonic import IsotonicRegression
+        
+        calibration_data             = pd.read_csv(inpath)
 
-        state_data = calibration_data.loc[ (calibration_data.location == location) & (calibration_data.week_ahead>0)]
+        locations = []
+        for location in calibration_data.location.values:
+            if location == "US":
+                pass
+            else:
+                location = "{:02d}".format(int(location))
+            locations.append(location)
+        calibration_data["location"] = locations
+
+        state_data = calibration_data.loc[ (calibration_data.location == self.location) & (calibration_data.week_ahead>0)]
 
         Fmodel_x = np.sort(state_data.Fmodel.values)
         Fmodel_y = np.arange(len(Fmodel_x))/len(Fmodel_x)
 
-        from sklearn.isotonic import IsotonicRegression
         finv = IsotonicRegression(y_min=0,y_max=1).fit(Fmodel_y,Fmodel_x)
 
+        self.finv = finv
+        return finv
+
+    def build_PI_dataset(self,quantiles = None, reference_date = None, recal=False):
+        import numpy as np
+        import pandas as pd
+        from datetime import datetime, timedelta
+        from epiweeks import Week
+        
+        forecasts = self.predictions["forecast"]
+        if quantiles is None:
+            quantiles = np.array(np.append(np.append([0.01,0.025],np.arange(0.05,0.95+0.05,0.05)), [0.975,0.99]))
+        percentiles = 100*quantiles
+
+        if recal:
+            recalibrated_percentiles = 100*self.finv.predict( percentiles/100 )
+            from_percentile_to_recal = pd.DataFrame({ "output_type_id":percentiles, "output_type_id__recal":recalibrated_percentiles })
+            recal_percentiles             = recalibrated_percentiles
+            self.from_percentile_to_recal = from_percentile_to_recal
+
+            forecasted_percentiles = np.percentile(forecasts, recal_percentiles, axis=0)
+        else:
+            forecasted_percentiles = np.percentile(forecasts, percentiles, axis=0)
+            
+
+        if reference_date is None:
+            reference_date     = Week.thisweek()
+
+        year = int(self.season.split("/")[0])
+        reference_date__dt = datetime( reference_date.enddate().year, reference_date.enddate().month, reference_date.enddate().day)
+        
+        week  = Week(year,40)
+        weeks = [ ]
+        while week != Week(year+1,22):
+            weeks.append(week.enddate().strftime("%Y-%m-%d"))
+            week = week + 1
+            
+        d = {"output_type_id":[],"value":[],"location":[],"reference_date":[],"target_end_date":[]}
+        L = len(percentiles)
+        for week,forecast in zip(weeks,forecasted_percentiles.T):
+            d["location"].extend([self.location]*L)
+            d["reference_date"].extend([reference_date__dt]*L)
+            d["target_end_date"].extend( [week]*L )
+            d["output_type_id"].extend(percentiles)
+            d["value"].extend(forecast)
+
+        d = pd.DataFrame(d)
+        d["output_type"] = "quantile"
+        d["target"]      = "wk inc flu hosp"
+        d["horizon"]     = [ int(( datetime.strptime(forecast_time,"%Y-%m-%d")- reference_date__dt).days/7) for forecast_time in d.target_end_date.values ]
+        
+        self.PI_database = d
+        return d
+
+
+        
+
+
+
+            
+
+
+
+
+            
