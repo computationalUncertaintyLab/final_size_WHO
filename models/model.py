@@ -75,7 +75,7 @@ class model(object):
         self.prior_parameters_for_training = prior_params
         return prior_params
 
-    def train(self,y, prior_parameters_dataset, season, location):
+    def train(self,y, prior_parameters_dataset, season, location, total_constraint=None):
         import numpy as np
 
         import numpyro
@@ -118,21 +118,31 @@ class model(object):
                     params[v] = numpyro.sample(v  , dist.LogNormal(-1,1) )
 
             if "K" in priors:
-                conc,mean = priors["K"]
+                conc,mean    = priors["K"]
                 params["K"]  = numpyro.sample("K"  , dist.Beta(conc*mean, conc*(1-mean) ) )
             else:
                 params["K"] = numpyro.sample("K"  , dist.Beta(1,1)       )
 
             if "N" in priors:
-                m,s = priors["N"]
-                log_N  = numpyro.sample( "N", dist.Normal(m,2))
+                m,s    = priors["N"]
+                log_N  = numpyro.sample( "N", dist.Normal(m,s))
                 N      = jnp.exp(log_N)
             else:
                 N      = numpyro.sample( "N", dist.LogNormal(jnp.log(10*10**3),1) )
 
             #--The B parameter is time-varying and controls how fast the epidemic moves over time 
-            sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-1,1))
+            sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-2,1))
+            #sigma_f2     = numpyro.sample("sigma_f2"     , dist.LogNormal(10,1))
             random_walk  = numpyro.sample("random_walk" , dist.GaussianRandomWalk( sigma_f, len(y) ) )
+            
+            # def rbf_kernel_ard(X1, X2, amplitude, lengthscales):
+            #     X1_scaled = X1 / lengthscales
+            #     X2_scaled = X2 / lengthscales
+            #     dists = jnp.sum((X1_scaled[:, None, :] - X2_scaled[None, :, :])**2, axis=-1)
+            #     return amplitude**2 * jnp.exp(-0.5 * dists)
+            
+            # K = rbf_kernel_ard( times.reshape(-1,1), times.reshape(-1,1), sigma_f, sigma_f2 )
+            # random_walk = numpyro.sample("random_walk", dist.MultivariateNormal(0,K))
             params["B"]  = params["B"] + random_walk
 
 
@@ -160,8 +170,13 @@ class model(object):
                 numpyro.sample("ll__from_data" , dist.Poisson(inc), obs = y)
                 
             #--Prior influenza from the shape of the curve where our current data is not yet observed
-            numpyro.sample("ll__from_prior", dist.Normal(mean_prior_curve[tobs:],std_prior_curve[tobs:]), obs = inc_p[tobs:] )
+            numpyro.sample("ll__from_prior", dist.Normal(mean_prior_curve[tobs:],2*std_prior_curve[tobs:]), obs = inc_p[tobs:] )
 
+            #--Total hosps or cases constraint, what ever the target is
+            if total_constraint is not None:
+                total_mean, total_sd = total_constraint
+                numpyro.sample("total_constraint", dist.Normal(total_mean, total_sd), obs = jnp.sum(inc) )
+            
             #--Forecast
             if forecast:
                 numpyro.sample("forecast", dist.Poisson(inc))
@@ -384,15 +399,3 @@ class model(object):
         
         self.PI_database = d
         return d
-
-
-        
-
-
-
-            
-
-
-
-
-            
