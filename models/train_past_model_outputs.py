@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
         quantile_data = pd.DataFrame(quantile_data)
 
-        path = "./models/cdf_files/arxiv_cdfs__{:s}_{:s}.csv".format(LOCATION,SEASON)
+        path = "./models/cdf_files/arxiv_cdfs__{:s}_{:s}.csv".format(LOCATION,args.SEASON)
         #fout = Path(path)
         #if fout.is_file():
         #    quantile_data.to_csv(path, index=False, mode="a", header=False)
