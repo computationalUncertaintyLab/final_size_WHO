@@ -71,12 +71,12 @@ if __name__ == "__main__":
 
         quantile_data = pd.DataFrame(quantile_data)
 
-        path = "./models/arxiv_cdfs.csv"
-        fout = Path(path)
-        if fout.is_file():
-            quantile_data.to_csv(path, index=False, mode="a", header=False)
-        else:
-            quantile_data.to_csv(path, index=False, mode="w", header=True)
+        path = "./models/cdf_files/arxiv_cdfs__{:s}_{:s}.csv".format(LOCATION,SEASON)
+        #fout = Path(path)
+        #if fout.is_file():
+        #    quantile_data.to_csv(path, index=False, mode="a", header=False)
+        #else:
+        quantile_data.to_csv(path, index=False, mode="w", header=True)
 
 
     
