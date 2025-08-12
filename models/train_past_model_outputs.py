@@ -34,9 +34,8 @@ if __name__ == "__main__":
     print(SEASON)
     print(LOCATION)
     
+    quantile_data = {"location":[],"season":[],"model_week":[],"forecast_week":[],"mmwr_yr":[],"mmwr_wk":[],"mmwr_enddate":[],"quantile":[],"quantile_value":[]}
     for model_week in subset_data.model_week.unique():
-        quantile_data = {"location":[],"season":[],"model_week":[],"forecast_week":[],"mmwr_yr":[],"mmwr_wk":[],"mmwr_enddate":[],"quantile":[],"quantile_value":[]}
-
         data = subset_data.loc[subset_data.model_week <= model_week]
         
         model_instance = model()
@@ -69,14 +68,10 @@ if __name__ == "__main__":
             quantile_data["quantile"].extend( quantiles )
             quantile_data["quantile_value"].extend(quantile_value)
 
-        quantile_data = pd.DataFrame(quantile_data)
+    quantile_data = pd.DataFrame(quantile_data)
 
-        path = "./models/cdf_files/arxiv_cdfs__{:s}_{:s}.csv".format(LOCATION,args.SEASON)
-        #fout = Path(path)
-        #if fout.is_file():
-        #    quantile_data.to_csv(path, index=False, mode="a", header=False)
-        #else:
-        quantile_data.to_csv(path, index=False, mode="w", header=True)
+    path = "./models/cdf_files/arxiv_cdfs__{:s}_{:s}.csv".format(LOCATION,args.SEASON)
+    quantile_data.to_csv(path, index=False, mode="w", header=True)
 
 
     
