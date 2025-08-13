@@ -131,18 +131,10 @@ class model(object):
                 N      = numpyro.sample( "N", dist.LogNormal(jnp.log(10*10**3),1) )
 
             #--The B parameter is time-varying and controls how fast the epidemic moves over time 
-            sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-2,1))
-            #sigma_f2     = numpyro.sample("sigma_f2"     , dist.LogNormal(10,1))
+            sigma_f      = numpyro.sample("sigma_f"     , dist.LogNormal(-4,1))
             random_walk  = numpyro.sample("random_walk" , dist.GaussianRandomWalk( sigma_f, len(y) ) )
+            random_walk  = numpyro.deterministic("centered_rw",random_walk - jnp.mean(random_walk) )
             
-            # def rbf_kernel_ard(X1, X2, amplitude, lengthscales):
-            #     X1_scaled = X1 / lengthscales
-            #     X2_scaled = X2 / lengthscales
-            #     dists = jnp.sum((X1_scaled[:, None, :] - X2_scaled[None, :, :])**2, axis=-1)
-            #     return amplitude**2 * jnp.exp(-0.5 * dists)
-            
-            # K = rbf_kernel_ard( times.reshape(-1,1), times.reshape(-1,1), sigma_f, sigma_f2 )
-            # random_walk = numpyro.sample("random_walk", dist.MultivariateNormal(0,K))
             params["B"]  = params["B"] + random_walk
 
 

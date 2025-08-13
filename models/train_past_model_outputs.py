@@ -44,9 +44,9 @@ if __name__ == "__main__":
         y = np.append(y, np.nan*np.ones( len(subset_data)-len(y) ) )
         
         forecasted_inc = model_instance.train(y = y
-                                     , prior_parameters_dataset = prior_parameters_dataset
-                                     , location = LOCATION
-                                     , season   = SEASON)
+                                              , prior_parameters_dataset = prior_parameters_dataset
+                                              , location = LOCATION
+                                              , season   = SEASON)
 
         percentiles     = np.arange(0,100+1,1)
         quantiles       = percentiles/100 
