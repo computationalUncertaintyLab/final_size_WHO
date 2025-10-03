@@ -27,7 +27,12 @@ if __name__ == "__main__":
         y_by_season = pd.pivot_table(index="season",columns="model_week",values="value",data=subset)
         y_by_season = y_by_season.to_numpy()
 
+        nseasons, ntimes= y_by_season.shape
+
         #--exclude this season
+        new_cases   = y_by_season[-1,:]
+        new_cases[10:] = np.nan
+        
         y_by_season = y_by_season[:-1,:]
 
         past_season_forecasts = []
@@ -38,7 +43,7 @@ if __name__ == "__main__":
 
         prior_tensor = []
         for season in range(nseasons-1):
-            model = preseason_single_season_models[season]
+            model = past_season_forecasts[season]
             prior_matrix = np.array([])
             for param in ["K","M_mu", "B_mu","B2_mu","nu_mu","Q_mu","transition_width"]:
                 prior_vector = np.array(model[param])
@@ -61,6 +66,8 @@ if __name__ == "__main__":
         prior_mus  = np.array(prior_mus)
         prior_covs = np.array(prior_covs)
 
-
-
-    
+        #--only need to run this through time 
+        tempo          = tempo_model2(y= new_cases.reshape(1,ntimes), N = np.ones( (1,ntimes) )*N , nobs=ntimes)# np.nan*np.ones(nweeks).reshape(1,nweeks), nobs=0)
+        forecast_model = tempo.fit_new_season(prior_mus=prior_mus, prior_covs = prior_covs, forecast=True, N_pred =  np.ones( (1,ntimes) )*N)
+        forecast_samples        = forecast_model["inc_pred"]
+ 
