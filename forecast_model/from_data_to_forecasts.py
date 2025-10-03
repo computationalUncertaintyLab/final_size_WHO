@@ -71,3 +71,5 @@ if __name__ == "__main__":
         forecast_model = tempo.fit_new_season(prior_mus=prior_mus, prior_covs = prior_covs, forecast=True, N_pred =  np.ones( (1,ntimes) )*N)
         forecast_samples        = forecast_model["inc_pred"]
  
+        break
+    

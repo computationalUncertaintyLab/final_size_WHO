@@ -293,30 +293,23 @@ class tempo_model2(object):
             
             # Hierarchical model for incidence parameters with more informative priors
             # Global (population) level parameters - more constrained priors
-            K = numpyro.sample("K"     , dist.Normal(0, 1))  # logit scale, ~0.1 prob
-            M = numpyro.sample("M_mu"  , dist.Normal(0, 1))  # log scale, ~20 weeks
-            B = numpyro.sample("B_mu"  , dist.Normal(0, 1))  # log scale, ~0.14
-            B2 = numpyro.sample("B2_mu", dist.Normal(0, 1))  # log scale, ~0.14
-            nu = numpyro.sample("nu_mu", dist.Normal(0, 1))  # log scale, ~1
-            Q = numpyro.sample("Q_mu"  , dist.Normal(0, 1))  # log scale, ~1
+            K                = numpyro.sample("K"     , dist.Normal(0, 1))  # logit scale, ~0.1 prob
+            M                = numpyro.sample("M_mu"  , dist.Normal(0, 1))  # log scale, ~20 weeks
+            B                = numpyro.sample("B_mu"  , dist.Normal(0, 1))  # log scale, ~0.14
+            B2               = numpyro.sample("B2_mu", dist.Normal(0, 1))  # log scale, ~0.14
+            nu               = numpyro.sample("nu_mu", dist.Normal(0, 1))  # log scale, ~1
+            Q                = numpyro.sample("Q_mu"  , dist.Normal(0, 1))  # log scale, ~1
             transition_width = numpyro.sample("transition_width", dist.Normal(0,1))
 
-            K  = expit(K)
-            M  = jnp.exp(M)#(ntimes-1)*jax.nn.sigmoid(M)
-            nu = jnp.exp(nu)
-            Q  = jnp.exp(Q)
-            B = jnp.exp(B)
-            B2 = jnp.exp(B2)
+            K                = expit(K)
+            M                = jnp.exp(M)
+            nu               = jnp.exp(nu)
+            Q                = jnp.exp(Q)
+            B                = jnp.exp(B)
+            B2               = jnp.exp(B2)
             transition_width = jnp.exp(transition_width)
 
-            # Smooth transition instead of sharp cutoff
-            #transition_point = numpyro.sample("transition_point", dist.Uniform(0, 1))
-            #transition_point = ntimes*transition_point
-
-
-
             # Sigmoid transition: smooth from 0 to 1
-            #print(M)
             transition_weight = jax.nn.sigmoid((times - M) / transition_width)
             B_over_time       = numpyro.deterministic("B_over_time", B + (B+B2) * transition_weight)
                 
@@ -325,38 +318,9 @@ class tempo_model2(object):
             inc                  =  vmap(inc_t, in_axes=(0,None,None,0,None,None,None))(times, A, K, B_over_time, M, Q, nu)
             inc = numpyro.deterministic("inc_base", inc)
 
-            #s = numpyro.sample("s", dist.HalfNormal(1./10))
-            #noise = numpyro.sample("noise", dist.Normal(0, s).expand([ntimes]))
-            #inc_logit = logit(inc) + noise
-            #inc = expit(inc_logit)
-
-            # Likelihood for observed cases using predicted N and season-specific incidence
-            # Mask for valid observations (both y and N must be non-NaN)
             present = ~jnp.isnan(y) & ~jnp.isnan(N)
-            y_safe   = jnp.where(present, y  , 0)
-            N_safe   = jnp.where(present, N  , 300.0)
-            inc_safe = jnp.where(present, inc, 0.01)
 
-            # p = inc  # or `inc` if you skipped (1)
-            # kappa = numpyro.sample("kappa_overdisp", dist.Gamma(2., 0.5))  # smaller = more overdispersion
-            # alpha = jnp.clip(p, 1e-9, 1-1e-9) * kappa
-            # beta  = (1. - jnp.clip(p, 1e-9, 1-1e-9)) * kappa
-            # with numpyro.handlers.mask(mask=present):
-            #     numpyro.sample("inc_ll", dist.BetaBinomial(concentration1=alpha, concentration0=beta, total_count=N_safe),obs = y_safe.astype(int))
-                #numpyro.sample("inc_ll", dist.Binomial(total_count=N_safe.astype(int), probs=inc_safe), obs=y_safe.astype(int))
-
-            # after you compute `inc` (baseline from your logistic-derivative)
             eps = 1e-9
-            # tau_shock = numpyro.sample("tau_shock", dist.HalfNormal(0.3))
-            # lam_t     = numpyro.sample("lam_shock", dist.HalfCauchy(1.).expand([ntimes]))
-            # z_t       = numpyro.sample("z_shock", dist.Normal(0., 1.).expand([ntimes]))
-            
-            # log_s_t   = tau_shock * lam_t * z_t                   # horseshoe shrinkage
-            # s_t       = jnp.exp(log_s_t)
-            # inc_spiky = numpyro.deterministic(
-            #     "inc_spiky", jnp.clip(inc * s_t, eps, 1.0 - eps)
-            # )
-
             eta_base = jax.scipy.special.logit(jnp.clip(inc, eps, 1-eps))
             sigma_obs = numpyro.sample("sigma_obs", dist.HalfNormal(1./10))
             eta       = eta_base + numpyro.sample("eps_t",
@@ -366,7 +330,7 @@ class tempo_model2(object):
 
             cases_predicted = numpyro.deterministic("cases_predicted", p_obs * N)
             with numpyro.handlers.mask(mask=present):
-                numpyro.sample("y", dist.Binomial(total_count=N_safe, probs=p_obs), obs=y_safe)
+                numpyro.sample("y", dist.Binomial(total_count=N, probs=p_obs), obs=y)
 
             
         # Use MCMC with tuned parameters for hierarchical model
@@ -419,7 +383,7 @@ class tempo_model2(object):
             nseasons_prior, nparams = prior_mus.shape
             
             # Sample weights for different seasons (how much to trust each historical season)
-            season_weights = numpyro.sample("season_weights", dist.Dirichlet(jnp.ones(nseasons_prior)))
+            season_weights = numpyro.sample("season_weights", dist.Dirichlet(5*jnp.ones(nseasons_prior)))
 
             temp = 0.1
             log_weights = jnp.log(season_weights)
