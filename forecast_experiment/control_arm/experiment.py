@@ -13,6 +13,8 @@ from epiweeks import Week
 
 from joblib import Parallel, delayed
 
+from datetime import datetime
+
 import os
 
 def add_time_data(row):
@@ -112,9 +114,7 @@ if __name__ == "__main__":
     all_params["location"] = [format(x) for x in all_params.location.values]
 
     def forecast( location, season, subset ):
-        print(location)
-
-        
+        print(f"Forecasting for {location} in season {season}")
         
         #param_data = {"location":[],"season":[],"param_type":[], "param1":[],"param2":[],"value":[]}
 
@@ -123,20 +123,27 @@ if __name__ == "__main__":
     
         #thisweek = Week.thisweek().enddate().strftime("%Y-%m-%d")
         
-        latest_MMWR = subset.MMWRWK.max()
+        latest_MMWR = subset.loc[ subset.season_week== subset.season_week.max(), "MMWRWK"].iloc[0]
+        season_str = season.replace("/", "_")
         if location=="US":
-           forecast_file  = "./forecast_experiment/control_arm/forecasts/forecast_US_{:02d}.csv".format(latest_MMWR)
+            forecast_file  = "./forecast_experiment/control_arm/forecasts/forecast_US_{}__{:02d}.csv".format(season_str, int(latest_MMWR))
         else:
-            forecast_file = "./forecast_experiment/control_arm/forecasts/forecast_{:02d}_{:02d}.csv".format( int(location),latest_MMWR)
-        
+            forecast_file = "./forecast_experiment/control_arm/forecasts/forecast_{:02d}_{}__{:02d}.csv".format(int(location), season_str, int(latest_MMWR))
+
+        print(f"Forecast file: {forecast_file}")
         if os.path.exists(forecast_file):
             return
         
         past_inc_hosps_state       = inc_hosps.loc[ (inc_hosps.location==location) & (inc_hosps.season!=season) ]
         past_inc_hosps_MMWR20      = past_inc_hosps_state.loc[past_inc_hosps_state.MMWRWK==20]
+        
         mean_past_inc_hosps_MMWR20 = np.nanmean(past_inc_hosps_MMWR20.value.values)
         sd_past_inc_hosps_MMWR20   = np.nanstd(past_inc_hosps_MMWR20.value.values)
 
+        if np.isnan(mean_past_inc_hosps_MMWR20) :
+            mean_past_inc_hosps_MMWR20 = 0
+        if np.isnan(sd_past_inc_hosps_MMWR20):
+            sd_past_inc_hosps_MMWR20 = 1
 
         state_ili = ili_data.loc[(ili_data.location==location) & (ili_data.season==season)].drop_duplicates()
         state_ili = state_ili.loc[(state_ili.MMWRWK>=40) | (state_ili.MMWRWK <=20)]
@@ -256,7 +263,7 @@ if __name__ == "__main__":
 
         # Define the start and end epiweeks for the 2024/2025 season
         start_year, start_week = int(min(subset.MMWRYR.values)), 40  
-        end_year, end_week     = int(max(subset.MMWRYR.values)), 22
+        end_year, end_week     = int(min(subset.MMWRYR.values))+1, 22
 
         #reference_date         = Week(start_year,start_week).enddate()
         reference_date         = datetime.strptime( subset.loc[ subset.MMWRWK==latest_MMWR, "date"].values[0], "%Y-%m-%d").date() #Week.thisweek().enddate() 
@@ -295,33 +302,43 @@ if __name__ == "__main__":
         weekly_forecast_data = weekly_forecast_data[columns]
 
         if location=="US":
-            weekly_forecast_data.to_csv("./forecast_experiment/control_arm/forecasts/forecast_US_{:s}.csv".format(latest_MMWR))
+            weekly_forecast_data.to_csv("./forecast_experiment/control_arm/forecasts/forecast_US_{}__{:02d}.csv".format(season_str, int(latest_MMWR)))
         else:
-            weekly_forecast_data.to_csv("./forecast_experiment/control_arm/forecasts/forecast_{:02d}_{:s}.csv".format( int(location),latest_MMWR))
+            weekly_forecast_data.to_csv("./forecast_experiment/control_arm/forecasts/forecast_{:02d}_{}__{:02d}.csv".format(int(location), season_str, int(latest_MMWR)))
 
     inc_hosps = inc_hosps.loc[inc_hosps.location.isin(all_params.location.unique())]
     inc_hosps = inc_hosps.loc[inc_hosps.season!='-1']
     
-    def tryit(location,season,subset,weather_data, pct_hosps_reporting,ili_augmented):
+    # Function that processes one individual forecast (location + season + week)
+    def process_single_forecast(location, season, subset_by_week):
         try:
-            forecast(location,season,subset,weather_data,pct_hosps_reporting,ili_augmented)
-        except:
-          print("Fail")
-          print(location)
+            forecast(location, season, subset_by_week)
+            return True
+        except Exception as e:
+            week = len(subset_by_week) - 1 if len(subset_by_week) > 0 else 0
+            print(f"Fail: {location}, season {season}, week {week}")
+            print(f"Error: {str(e)}")
+            return False
 
-    for (location,season),subset in inc_hosps.groupby(["location","season"]):
+    # Prepare all individual forecast tasks (location, season, week combinations)
+    tasks = []
+    for (location, season), subset in inc_hosps.groupby(["location", "season"]):
         subset = subset.sort_values(["date"])
+        subset = subset.loc[(subset.MMWRWK >= 40) | ((subset.MMWRWK <= 20) & (subset.MMWRWK >= 1))]
         subset["season_week"] = np.arange(len(subset))
         
         for week in subset.season_week:
-            subset_by_week = subset.loc[ (subset.season_week<=week) & (subset.MMWRWK>=40) ] #<--lets keep everything fair by starting at MMWR40
-            forecast(location,season,subset_by_week)
-
-            break
-        break
+            subset_by_week = subset.loc[(subset.season_week <= week)]
+            tasks.append((location, season, subset_by_week.copy()))
     
-        
-    Parallel(n_jobs=20)( delayed(tryit)(location,season,subset,weather_data, pct_hosps_reporting,ili_augmented) for (location,season), subset in inc_hosps.groupby(["location","season"]) )
+    print(f"Total forecast tasks to process: {len(tasks)}")
+
+    # Run all forecasts in parallel across locations, seasons, and weeks
+    results = Parallel(n_jobs=20)(
+        delayed(process_single_forecast)(location, season, subset_by_week)
+        for location, season, subset_by_week in tasks
+    )
+    
    
 
 

@@ -25,5 +25,9 @@ fig1:
 	@echo "Build Fig01"
 	@$(VENV_PYTHON) ./viz/showcase_data_and_idea/plot.py
 
-
-
+# Forecast Evaluation Pipeline
+evaluate: prepare_forecasts score_forecasts merge_scores compute_pit
+	@$(VENV_PYTHON) ./forecast_experiment/evaluation/prepare_forecasts_for_scoring.py
+	@$(R) ./forecast_experiment/evaluation/score_forecasts.R
+	@$(VENV_PYTHON) ./forecast_experiment/evaluation/merge_scores_with_observations.py
+	@$(VENV_PYTHON) ./forecast_experiment/evaluation/compute_pit_scores.py
